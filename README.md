@@ -94,6 +94,19 @@ packaging/build-deb.sh 0.1.1      # produit dist/pcloud-desktop_0.1.1_amd64.deb
 Les dépendances sont déduites des bibliothèques réellement liées au binaire
 (`ldd`), complétées de celles que GLFW charge à l'exécution.
 
+### Publier une version
+
+```sh
+packaging/release.sh 0.2.0 --dry-run   # tout vérifier et construire, sans rien publier
+packaging/release.sh 0.2.0             # publier (demande confirmation)
+```
+
+Le script vérifie que l'arbre est propre et à jour, lance les tests, construit
+et contrôle le `.deb`, génère les notes depuis l'historique git, puis commite
+les numéros de version, pousse `main`, pose le tag `vX.Y.Z` et crée la release
+GitHub (paquet + empreinte SHA-256). Il nécessite `gh` authentifié.
+Options : `--yes` (sans confirmation), `--notes FICHIER`, `--draft`.
+
 ## Compte créé avec Google
 
 Un compte créé via « Se connecter avec Google » n'a pas de mot de passe pCloud.
@@ -104,7 +117,7 @@ pCloud), puis se connecter par e-mail ; ou coller le jeton `auth` dans l'onglet
 ## Structure
 
 - `main.go` : point d'entrée, crée la fenêtre et applique le thème.
-- `packaging/` : script de construction du `.deb`, icône.
+- `packaging/` : `build-deb.sh` (paquet), `release.sh` (publication), icône.
 - `internal/pcloud/` : client de l'API pCloud, sans code d'interface.
   - `client.go` : appels, erreurs, session ;
   - `api.go` : fichiers, dossiers, transferts, miniatures ;
