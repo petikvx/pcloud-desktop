@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -284,13 +285,23 @@ func (b *browser) openHLSToolWith(src string) {
 		fd.Show()
 	})
 
-	note := widget.NewLabel("Vidéo et audio sont enregistrés en fichiers séparés (pas de fusion interne) ; " +
-		"ffmpeg peut les assembler : ffmpeg -i video -i audio -c copy sortie.mp4")
+	ffmpeg, _ := exec.LookPath("ffmpeg")
+	convert := widget.NewCheck("Convertir en MP4 et fusionner audio / sous-titres (ffmpeg)", nil)
+	note := widget.NewLabel("")
 	note.Wrapping = fyne.TextWrapWord
+	if ffmpeg != "" {
+		convert.SetChecked(true)
+		note.SetText("Sans ré-encodage : quelques secondes de plus. Décoché, vidéo, audio et sous-titres sont " +
+			"enregistrés en fichiers séparés (.ts / .vtt), le conteneur d'origine du flux.")
+	} else {
+		convert.Disable()
+		note.SetText("ffmpeg est introuvable : vidéo, audio et sous-titres sont enregistrés en fichiers séparés " +
+			"(.ts / .vtt). Installez ffmpeg pour obtenir un MP4 unique.")
+	}
 
 	content := container.NewGridWrap(fyne.NewSize(600, 480), container.NewVScroll(container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(pickFile, analyseBtn), entry),
-		status, choices, widget.NewSeparator(), note,
+		status, choices, widget.NewSeparator(), convert, note,
 	)))
 
 	d := dialog.NewCustomConfirm("Lire un flux HLS (master.m3u8)", "Télécharger", "Fermer", content, func(ok bool) {
@@ -320,7 +331,11 @@ func (b *browser) openHLSToolWith(src string) {
 			}
 			videoURL = v.URI
 		}
-		b.startHLS(dl, source, videoURL, single, chosenAudio, chosenSubs)
+		merge := ""
+		if convert.Checked {
+			merge = ffmpeg
+		}
+		b.startHLS(dl, source, videoURL, single, chosenAudio, chosenSubs, merge)
 	}, b.w)
 	d.Show()
 	if src != "" {
@@ -343,7 +358,8 @@ func contains(list []string, s string) bool {
 // startHLS prépare le téléchargement : récupère la playlist vidéo (pour
 // connaître l'extension), demande l'emplacement, puis télécharge vidéo, audio
 // et sous-titres sélectionnés.
-func (b *browser) startHLS(dl *hls.Downloader, source, videoURL string, single *hls.Media, audio, subs []hls.Rendition) {
+// merge non vide : chemin de ffmpeg, pour assembler le tout en un MP4.
+func (b *browser) startHLS(dl *hls.Downloader, source, videoURL string, single *hls.Media, audio, subs []hls.Rendition, merge string) {
 	b.status.SetText("Lecture de la playlist vidéo…")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -363,13 +379,16 @@ func (b *browser) startHLS(dl *hls.Downloader, source, videoURL string, single *
 				dialog.ShowError(err, b.w)
 				return
 			}
-			b.saveHLS(dl, source, video, audio, subs)
+			b.saveHLS(dl, source, video, audio, subs, merge)
 		})
 	}()
 }
 
-func (b *browser) saveHLS(dl *hls.Downloader, source string, video *hls.Media, audio, subs []hls.Rendition) {
+func (b *browser) saveHLS(dl *hls.Downloader, source string, video *hls.Media, audio, subs []hls.Rendition, merge string) {
 	ext := hlsExt(video, false)
+	if merge != "" {
+		ext = ".mp4"
+	}
 	d := dialog.NewFileSave(func(wc fyne.URIWriteCloser, err error) {
 		if err != nil {
 			dialog.ShowError(err, b.w)
@@ -379,12 +398,19 @@ func (b *browser) saveHLS(dl *hls.Downloader, source string, video *hls.Media, a
 			return
 		}
 		b.transfer("Téléchargement HLS", func(ctx context.Context, report func(string, float64)) error {
-			defer wc.Close()
-			return runHLS(ctx, dl, wc, wc.URI().Path(), video, audio, subs, report, func(files []string) {
+			finished := func(files []string) {
 				fyne.Do(func() {
 					dialog.ShowInformation("Téléchargement terminé", "Fichiers enregistrés :\n"+strings.Join(files, "\n"), b.w)
 				})
-			})
+			}
+			if merge != "" {
+				// ffmpeg écrit lui-même le fichier choisi (déjà confirmé dans la boîte de dialogue).
+				path := wc.URI().Path()
+				_ = wc.Close()
+				return runHLSMerged(ctx, dl, merge, path, video, audio, subs, report, finished)
+			}
+			defer wc.Close()
+			return runHLS(ctx, dl, wc, wc.URI().Path(), video, audio, subs, report, finished)
 		})
 	}, b.w)
 	d.SetFileName(hlsBaseName(source) + ext)

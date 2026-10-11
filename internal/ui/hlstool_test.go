@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"pcloud-desktop/internal/hls"
@@ -168,5 +170,113 @@ func TestRunHLSWritesVideoAudioAndSubtitles(t *testing.T) {
 	}
 	if lastFrac < 0.99 {
 		t.Fatalf("progression finale = %v", lastFrac)
+	}
+}
+
+func TestISO639(t *testing.T) {
+	for in, want := range map[string]string{"fr": "fra", "en-US": "eng", "FRA": "fra", "pt_BR": "por", "xx": "", "": ""} {
+		if got := iso639(in); got != want {
+			t.Errorf("iso639(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFFmpegArgs(t *testing.T) {
+	audio := []hls.Rendition{{Language: "fr", Name: "Français"}, {Language: "en", Name: "English"}}
+	subs := []hls.Rendition{{Language: "fr"}}
+	got := ffmpegArgs([]string{"v.ts", "a1.ts", "a2.ts", "s.vtt"}, audio, subs, "out.mp4")
+	joined := strings.Join(got, " ")
+	for _, want := range []string{
+		"-i v.ts -i a1.ts -i a2.ts -i s.vtt",
+		"-map 0:v? -map 1:a -map 2:a -map 3:s",
+		"-c copy -c:s mov_text",
+		"-metadata:s:a:0 language=fra", "-metadata:s:a:1 language=eng", "-metadata:s:s:0 language=fra",
+		"-metadata:s:a:0 handler_name=Français",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("manque %q dans : %s", want, joined)
+		}
+	}
+	if got[len(got)-1] != "out.mp4" {
+		t.Errorf("la sortie doit être en dernier : %v", got)
+	}
+	// Sans piste séparée : toutes les pistes de la vidéo sont conservées.
+	if j := strings.Join(ffmpegArgs([]string{"v.ts"}, nil, nil, "o.mp4"), " "); !strings.Contains(j, "-map 0 ") {
+		t.Errorf("sans audio séparé : -map 0 attendu : %s", j)
+	}
+}
+
+// Intégration réelle : nécessite ffmpeg et ffprobe, sinon le test est sauté.
+func TestRunHLSMergedWithRealFFmpeg(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg absent")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe absent")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command(ffmpeg, append([]string{"-y", "-loglevel", "error"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v : %v\n%s", args, err, out)
+		}
+	}
+	run("-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=10", "-c:v", "libx264", "-f", "mpegts", filepath.Join(dir, "v0.ts"))
+	run("-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "aac", "-f", "mpegts", filepath.Join(dir, "a0.ts"))
+	run("-f", "lavfi", "-i", "sine=frequency=880:duration=2", "-c:a", "aac", "-f", "mpegts", filepath.Join(dir, "a1.ts"))
+	if err := os.WriteFile(filepath.Join(dir, "s0.vtt"), []byte("WEBVTT\n\n00:00:00.000 --> 00:00:01.500\nBonjour\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pl := func(name, seg string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#EXTM3U\n#EXTINF:2,\n"+seg+"\n#EXT-X-ENDLIST\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	dl := hls.NewDownloader()
+	_, video, err := dl.FetchPlaylist(context.Background(), pl("v.m3u8", "v0.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "final.mp4")
+	var files []string
+	err = runHLSMerged(context.Background(), dl, ffmpeg, out, video,
+		[]hls.Rendition{
+			{Type: "AUDIO", Language: "fr", Name: "Français", URI: pl("a0.m3u8", "a0.ts")},
+			{Type: "AUDIO", Language: "en", Name: "English", URI: pl("a1.m3u8", "a1.ts")},
+		},
+		[]hls.Rendition{{Type: "SUBTITLES", Language: "fr", URI: pl("s.m3u8", "s0.vtt")}},
+		func(string, float64) {}, func(f []string) { files = f })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != out {
+		t.Fatalf("fichiers = %v", files)
+	}
+	probe, err := exec.Command(ffprobe, "-v", "error", "-show_entries", "stream=codec_type:stream_tags=language",
+		"-of", "csv=p=0", out).CombinedOutput()
+	if err != nil {
+		t.Fatalf("ffprobe : %v\n%s", err, probe)
+	}
+	got := strings.Fields(strings.ReplaceAll(string(probe), "\r", ""))
+	want := []string{"video,und", "audio,fra", "audio,eng", "subtitle,fra"}
+	// ffprobe peut omettre la balise si absente : on compare sur le type + langue.
+	if len(got) != len(want) {
+		t.Fatalf("flux = %v, attendus %v", got, want)
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], strings.Split(want[i], ",")[0]) {
+			t.Errorf("flux %d = %q, attendu %q", i, got[i], want[i])
+		}
+	}
+	if !strings.Contains(string(probe), "audio,fra") || !strings.Contains(string(probe), "audio,eng") ||
+		!strings.Contains(string(probe), "subtitle,fra") {
+		t.Errorf("langues manquantes : %s", probe)
+	}
+	if entries, _ := filepath.Glob(filepath.Join(os.TempDir(), "pcloud-hls-*")); len(entries) > 0 {
+		t.Logf("dossiers temporaires restants (peut venir d'autres exécutions) : %v", entries)
 	}
 }
