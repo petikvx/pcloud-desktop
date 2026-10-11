@@ -90,7 +90,7 @@ func (b *browser) downloadStream(it pcloud.Item) {
 			b.status.SetText(summary(b.view))
 			switch {
 			case webErr == nil && (isHLS || looksLikeHLS(link)):
-				b.openHLSToolWith(link)
+				b.openHLSToolWith(link, it.Name)
 			case webErr == nil:
 				b.saveStream(it, streamFileName(it.Name, 0), func(context.Context) (string, error) { return link, nil })
 			case pcloud.IsAuthError(webErr):

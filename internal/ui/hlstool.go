@@ -115,6 +115,27 @@ func hlsBaseName(src string) string {
 	return name
 }
 
+// videoExts : extensions retirées d'un nom de fichier pCloud pour en faire la
+// base du nom de sortie (« Film.mkv » → « Film »).
+var videoExts = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".mov": true, ".m4v": true, ".ts": true,
+	".webm": true, ".wmv": true, ".flv": true, ".mpg": true, ".mpeg": true, ".m2ts": true,
+}
+
+// outputBaseName choisit la base du nom de sortie : le nom du fichier pCloud
+// s'il est connu (hint), sinon un nom déduit de l'URL ou du chemin saisi.
+func outputBaseName(source, hint string) string {
+	if hint = strings.TrimSpace(hint); hint != "" {
+		if ext := filepath.Ext(hint); videoExts[strings.ToLower(ext)] {
+			hint = strings.TrimSuffix(hint, ext)
+		}
+		if validName(hint) {
+			return hint
+		}
+	}
+	return hlsBaseName(source)
+}
+
 // safeSuffix rend une langue ou un nom utilisable dans un nom de fichier.
 func safeSuffix(s string) string {
 	s = strings.Map(func(r rune) rune {
@@ -131,10 +152,12 @@ func safeSuffix(s string) string {
 
 // openHLSTool ouvre l'outil « Flux HLS » : lit un master.m3u8 (URL ou fichier),
 // propose qualité, pistes audio et sous-titres, puis télécharge.
-func (b *browser) openHLSTool() { b.openHLSToolWith("") }
+func (b *browser) openHLSTool() { b.openHLSToolWith("", "") }
 
 // openHLSToolWith ouvre l'outil ; si src n'est pas vide, il est analysé aussitôt.
-func (b *browser) openHLSToolWith(src string) {
+// name (facultatif) est le nom du fichier pCloud d'origine, utilisé pour nommer
+// le résultat.
+func (b *browser) openHLSToolWith(src, name string) {
 	dl := hls.NewDownloader()
 
 	var (
@@ -335,7 +358,7 @@ func (b *browser) openHLSToolWith(src string) {
 		if convert.Checked {
 			merge = ffmpeg
 		}
-		b.startHLS(dl, source, videoURL, single, chosenAudio, chosenSubs, merge)
+		b.startHLS(dl, outputBaseName(source, name), videoURL, single, chosenAudio, chosenSubs, merge)
 	}, b.w)
 	d.Show()
 	if src != "" {
@@ -359,7 +382,7 @@ func contains(list []string, s string) bool {
 // connaître l'extension), demande l'emplacement, puis télécharge vidéo, audio
 // et sous-titres sélectionnés.
 // merge non vide : chemin de ffmpeg, pour assembler le tout en un MP4.
-func (b *browser) startHLS(dl *hls.Downloader, source, videoURL string, single *hls.Media, audio, subs []hls.Rendition, merge string) {
+func (b *browser) startHLS(dl *hls.Downloader, baseName, videoURL string, single *hls.Media, audio, subs []hls.Rendition, merge string) {
 	b.status.SetText("Lecture de la playlist vidéo…")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -379,12 +402,12 @@ func (b *browser) startHLS(dl *hls.Downloader, source, videoURL string, single *
 				dialog.ShowError(err, b.w)
 				return
 			}
-			b.saveHLS(dl, source, video, audio, subs, merge)
+			b.saveHLS(dl, baseName, video, audio, subs, merge)
 		})
 	}()
 }
 
-func (b *browser) saveHLS(dl *hls.Downloader, source string, video *hls.Media, audio, subs []hls.Rendition, merge string) {
+func (b *browser) saveHLS(dl *hls.Downloader, baseName string, video *hls.Media, audio, subs []hls.Rendition, merge string) {
 	ext := hlsExt(video, false)
 	if merge != "" {
 		ext = ".mp4"
@@ -413,7 +436,7 @@ func (b *browser) saveHLS(dl *hls.Downloader, source string, video *hls.Media, a
 			return runHLS(ctx, dl, wc, wc.URI().Path(), video, audio, subs, report, finished)
 		})
 	}, b.w)
-	d.SetFileName(hlsBaseName(source) + ext)
+	d.SetFileName(baseName + ext)
 	d.Show()
 }
 

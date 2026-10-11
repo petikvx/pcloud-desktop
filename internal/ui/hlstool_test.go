@@ -280,3 +280,18 @@ func TestRunHLSMergedWithRealFFmpeg(t *testing.T) {
 		t.Logf("dossiers temporaires restants (peut venir d'autres exécutions) : %v", entries)
 	}
 }
+
+func TestOutputBaseName(t *testing.T) {
+	cases := []struct{ source, hint, want string }{
+		{"https://et3-c.pcloud.com/VcWZwjNxzy7ZXvls2G7Zilu0ZYZ/master.m3u8", "Scary.Movie.2.2001.MULTi.1080p.WEB.H265-TyHD.mkv", "Scary.Movie.2.2001.MULTi.1080p.WEB.H265-TyHD"},
+		{"https://h/x/master.m3u8", "Vacances été 2024.MP4", "Vacances été 2024"},
+		{"https://h/x/master.m3u8", "Film.sans.extension.video", "Film.sans.extension.video"}, // « .video » n'est pas une extension connue
+		{"https://h/vacances/plage/master.m3u8", "", "plage"},
+		{"https://h/x/master.m3u8", "a/b", "x"}, // nom invalide : repli sur l'URL
+	}
+	for _, c := range cases {
+		if got := outputBaseName(c.source, c.hint); got != c.want {
+			t.Errorf("outputBaseName(%q, %q) = %q, want %q", c.source, c.hint, got, c.want)
+		}
+	}
+}
