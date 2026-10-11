@@ -429,3 +429,103 @@ func TestAllRenditionsSpansGroupsWithoutDuplicates(t *testing.T) {
 		t.Fatal("aucun sous-titre attendu")
 	}
 }
+
+const prefsMaster = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v1a",NAME="English",LANGUAGE="en",URI="a/en1.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v1a",NAME="French, low",LANGUAGE="fr",URI="a/fr1.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v2a",NAME="English",LANGUAGE="en",URI="a/en2.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v2a",NAME="French",LANGUAGE="fr",URI="a/fr2.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v3a",NAME="English",LANGUAGE="en",URI="a/en3.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v3a",NAME="French, high",LANGUAGE="fr",DEFAULT=YES,URI="a/fr3.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="Français",LANGUAGE="fra",URI="s/fr.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=2628000,RESOLUTION=960x540,AUDIO="v1a",SUBTITLES="s"
+540/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=3660000,RESOLUTION=1280x720,AUDIO="v2a",SUBTITLES="s"
+720/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5192000,RESOLUTION=1920x1080,AUDIO="v3a",SUBTITLES="s"
+1080/index.m3u8
+`
+
+func TestSelectVideoByHeight(t *testing.T) {
+	m, _ := mustParse(t, prefsMaster, "https://h.example/m/master.m3u8")
+	cases := []struct {
+		height int
+		want   int
+	}{{0, 1080}, {1080, 1080}, {900, 720}, {720, 720}, {600, 540}, {400, 540}}
+	for _, c := range cases {
+		sel, err := m.Select(Preferences{Height: c.height})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sel.Variant.Height != c.want {
+			t.Errorf("hauteur %d : variante %d, attendu %d", c.height, sel.Variant.Height, c.want)
+		}
+	}
+	sel, _ := m.Select(Preferences{Height: 400})
+	if len(sel.Notes) == 0 {
+		t.Error("une note de repli est attendue quand tout dépasse la hauteur visée")
+	}
+}
+
+func TestSelectAudioVersionsByQuality(t *testing.T) {
+	m, _ := mustParse(t, prefsMaster, "https://h.example/m/master.m3u8")
+	cases := []struct {
+		q    Quality
+		want string
+	}{{QualityBest, "French, high"}, {QualityMiddle, "French"}, {QualityLowest, "French, low"}}
+	for _, c := range cases {
+		sel, err := m.Select(Preferences{AudioLangs: []string{"fr"}, AudioQuality: c.q})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sel.Audio) != 1 || sel.Audio[0].Name != c.want {
+			t.Errorf("qualité %d : %+v, attendu %q", c.q, sel.Audio, c.want)
+		}
+	}
+	// Deux langues, dans l'ordre demandé ; « fra » est reconnu comme « fr ».
+	sel, _ := m.Select(Preferences{AudioLangs: []string{"en", "FRA"}, AudioQuality: QualityBest})
+	if len(sel.Audio) != 2 || sel.Audio[0].Language != "en" || sel.Audio[1].Name != "French, high" {
+		t.Fatalf("audio = %+v", sel.Audio)
+	}
+}
+
+func TestSelectFallbackAndSubtitles(t *testing.T) {
+	m, _ := mustParse(t, prefsMaster, "https://h.example/m/master.m3u8")
+	// Langue absente : repli sur la piste par défaut du groupe de la variante (1080p → v3a).
+	sel, _ := m.Select(Preferences{AudioLangs: []string{"de"}})
+	if len(sel.Audio) != 1 || sel.Audio[0].Name != "French, high" {
+		t.Fatalf("repli = %+v", sel.Audio)
+	}
+	if len(sel.Notes) < 2 {
+		t.Errorf("notes = %v", sel.Notes)
+	}
+	// Sans préférence audio : piste par défaut, jamais de vidéo muette.
+	sel, _ = m.Select(Preferences{})
+	if len(sel.Audio) != 1 {
+		t.Fatalf("audio par défaut = %+v", sel.Audio)
+	}
+	sel, _ = m.Select(Preferences{SubLangs: []string{"fr", "es"}})
+	if len(sel.Subs) != 1 || sel.Subs[0].Name != "Français" {
+		t.Fatalf("sous-titres = %+v", sel.Subs)
+	}
+	if _, err := (*Master)(nil).Select(Preferences{}); err == nil {
+		t.Fatal("master nil : erreur attendue")
+	}
+}
+
+func TestLanguagesSummary(t *testing.T) {
+	m, _ := mustParse(t, prefsMaster, "https://h.example/m/master.m3u8")
+	langs := Languages(m.AllRenditions("AUDIO"))
+	if len(langs) != 2 {
+		t.Fatalf("langues = %+v", langs)
+	}
+	if langs[0].Key != "en" || langs[0].Versions != 3 || langs[1].Key != "fr" || langs[1].Versions != 3 || !langs[1].Default {
+		t.Fatalf("langues = %+v", langs)
+	}
+	if langs[1].Label != "French (fr)" {
+		t.Fatalf("libellé = %q", langs[1].Label)
+	}
+	if LangKey("fr-CA") != "fr" || LangKey("fre") != "fr" || LangKey("") != "" {
+		t.Fatal("LangKey")
+	}
+}

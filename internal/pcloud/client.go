@@ -61,6 +61,9 @@ func New() *Client {
 	}
 }
 
+// SetBaseURL remplace le serveur (tests et développement uniquement).
+func (c *Client) SetBaseURL(u string) { c.base = strings.TrimRight(u, "/") }
+
 // Auth retourne le jeton d'authentification courant (vide si non connecté).
 func (c *Client) Auth() string { return c.auth }
 

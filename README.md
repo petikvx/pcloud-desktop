@@ -26,6 +26,12 @@ Serveur utilisé : `eapi.pcloud.com` (datacenter européen) uniquement.
   les pistes audio et sous-titres choisis, langues comprises ; sinon, vidéo,
   audio et sous-titres sont enregistrés en fichiers séparés (.ts / .vtt).
   Non géré : SAMPLE-AES / DRM, flux en direct.
+- **Téléchargement d'un dossier entier** (clic droit sur un dossier →
+  « Télécharger le dossier (streaming)… ») : on choisit **une fois** la qualité
+  vidéo et les langues (audio, version low / high, sous-titres), le dossier est
+  recréé en local avec ses sous-dossiers, puis chaque vidéo est téléchargée en
+  file d'attente avec les mêmes préférences. Un échec n'arrête pas le lot ; on
+  peut relancer : les fichiers déjà présents sont ignorés.
 - **Envoi** de fichiers et de dossiers (bouton « Envoyer » ou glisser-déposer),
   avec progression et annulation.
 - **Actions** (clic droit) : renommer, déplacer, supprimer, créer et copier un
@@ -83,8 +89,9 @@ go run .
   `client.go` (appels, erreurs), `api.go` (fichiers, transferts, miniatures), `video.go` (streaming),
   `oauth.go` (connexion OAuth2).
 - `internal/hls/` : lecture des playlists HLS et téléchargement des segments.
+- `internal/queue/` : file d'attente séquentielle avec suivi d'état.
 - `internal/ui/` : `ui.go` (connexion), `browser.go` (navigateur et actions),
-  `row.go` (ligne de liste), `video.go` (choix du format), `hlstool.go` (outil HLS), `thumbs.go` (cache de miniatures), `format.go`
+  `row.go` (ligne de liste), `video.go` (choix du format), `hlstool.go` (outil HLS), `folderdl.go` / `folderjob.go` (dossiers), `thumbs.go` (cache de miniatures), `format.go`
   (tri, filtre, formats), `theme.go`.
 
 ## Notes
