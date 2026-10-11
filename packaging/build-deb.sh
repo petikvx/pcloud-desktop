@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Construit le paquet .deb de pcloud-desktop (Wayland + X11).
 #
-# Usage : packaging/build-deb.sh [version]      (défaut : 0.1.0)
+# Usage : packaging/build-deb.sh [version]      (défaut : 0.1.1)
 # Sortie : dist/pcloud-desktop_<version>_<arch>.deb
 #
 # Prérequis : go, gcc, dpkg-dev, et les en-têtes de développement de Fyne
 #   sudo apt install gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
 set -euo pipefail
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:-0.1.1}"
 NAME="pcloud-desktop"
 MAINTAINER="PetiK <petikvx@gmail.com>"
 HOMEPAGE="https://github.com/petikvx/pcloud-desktop"

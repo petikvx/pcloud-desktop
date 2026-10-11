@@ -77,7 +77,7 @@ sous-titres en un MP4 (`sudo apt install ffmpeg`).
 ## Installer (paquet .deb)
 
 ```sh
-sudo apt install ./pcloud-desktop_0.1.0_amd64.deb
+sudo apt install ./pcloud-desktop_0.1.1_amd64.deb
 pcloud-desktop --version
 ```
 
@@ -88,7 +88,7 @@ Le paquet (Wayland + X11) installe le binaire, l'entrée de menu et l'icône.
 
 ```sh
 sudo apt install gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
-packaging/build-deb.sh 0.1.0      # produit dist/pcloud-desktop_0.1.0_amd64.deb
+packaging/build-deb.sh 0.1.1      # produit dist/pcloud-desktop_0.1.1_amd64.deb
 ```
 
 Les dépendances sont déduites des bibliothèques réellement liées au binaire
