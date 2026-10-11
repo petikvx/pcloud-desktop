@@ -11,6 +11,11 @@ Serveur utilisé : `eapi.pcloud.com` (datacenter européen) uniquement.
   premier, fil d'Ariane cliquable, précédent / dossier parent / actualiser,
   recherche dans le dossier, miniatures des images, icônes par type.
 - **Téléchargement** d'un fichier, avec progression.
+- **Version streaming des vidéos** (clic droit → « Télécharger une version
+  streaming… ») : choix parmi les variantes déjà disponibles (résolution,
+  codecs, débits) ou transcodage personnalisé par pCloud (résolution, débit
+  vidéo et audio). La langue n'est pas gérée : l'API pCloud n'expose pas les
+  pistes audio ; le fichier original, lui, les conserve toutes.
 - **Envoi** de fichiers et de dossiers (bouton « Envoyer » ou glisser-déposer),
   avec progression et annulation.
 - **Actions** (clic droit) : renommer, déplacer, supprimer, créer et copier un
@@ -64,10 +69,10 @@ go run .
 
 - `main.go` : point d'entrée, crée la fenêtre et applique le thème.
 - `internal/pcloud/` : client de l'API pCloud, sans code d'interface.
-  `client.go` (appels, erreurs), `api.go` (fichiers, transferts, miniatures),
+  `client.go` (appels, erreurs), `api.go` (fichiers, transferts, miniatures), `video.go` (streaming),
   `oauth.go` (connexion OAuth2).
 - `internal/ui/` : `ui.go` (connexion), `browser.go` (navigateur et actions),
-  `row.go` (ligne de liste), `thumbs.go` (cache de miniatures), `format.go`
+  `row.go` (ligne de liste), `video.go` (choix du format), `thumbs.go` (cache de miniatures), `format.go`
   (tri, filtre, formats), `theme.go`.
 
 ## Notes

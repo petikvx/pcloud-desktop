@@ -471,6 +471,9 @@ func (b *browser) showMenu(idx int, pos fyne.Position) {
 		items = append(items, fyne.NewMenuItem("Ouvrir", func() { b.open(idx) }))
 	} else {
 		items = append(items, fyne.NewMenuItem("Télécharger…", func() { b.download(it) }))
+		if it.Category == pcloud.CategoryVideo {
+			items = append(items, fyne.NewMenuItem("Télécharger une version streaming…", func() { b.downloadStream(it) }))
+		}
 	}
 	items = append(items,
 		fyne.NewMenuItem("Renommer…", func() { b.rename(it) }),

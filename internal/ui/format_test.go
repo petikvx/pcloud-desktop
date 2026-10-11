@@ -118,3 +118,33 @@ func TestFormatDateZero(t *testing.T) {
 		t.Fatal("date zéro : chaîne vide attendue")
 	}
 }
+
+func TestFormatDuration(t *testing.T) {
+	cases := map[float64]string{0: "", -1: "", 5: "0:05", 125.4: "2:05", 3600: "1:00:00", 3725: "1:02:05"}
+	for in, want := range cases {
+		if got := formatDuration(in); got != want {
+			t.Errorf("formatDuration(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestVariantLabel(t *testing.T) {
+	v := pcloud.VideoVariant{Width: 1280, Height: 720, VideoCodec: "h264", AudioCodec: "aac",
+		VideoBitrate: 1500, AudioBitrate: 128, Duration: "125", IsOriginal: true}
+	want := "1280×720 · h264/aac · 1500+128 kb/s · 2:05 (original)"
+	if got := variantLabel(v); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := variantLabel(pcloud.VideoVariant{Width: 640, Height: 360}); got != "640×360" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestStreamFileName(t *testing.T) {
+	if got := streamFileName("Plage été.MOV", 720); got != "Plage été - 720p.mp4" {
+		t.Fatalf("got %q", got)
+	}
+	if got := streamFileName("clip", 0); got != "clip - streaming.mp4" {
+		t.Fatalf("got %q", got)
+	}
+}

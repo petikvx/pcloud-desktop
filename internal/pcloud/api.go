@@ -202,6 +202,12 @@ func (c *Client) Download(ctx context.Context, fileID uint64, w io.Writer, progr
 	if err != nil {
 		return err
 	}
+	return c.DownloadURL(ctx, u, w, progress)
+}
+
+// DownloadURL écrit dans w le contenu servi par une URL de contenu pCloud
+// (fichier, variante vidéo…). progress reçoit total <= 0 si la taille est inconnue.
+func (c *Client) DownloadURL(ctx context.Context, u string, w io.Writer, progress func(done, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err

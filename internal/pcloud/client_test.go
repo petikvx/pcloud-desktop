@@ -261,3 +261,64 @@ func asAPIError(err error, target **APIError) bool {
 	}
 	return ok
 }
+
+func TestVideoVariantsToleratesNumberOrStringFields(t *testing.T) {
+	f, c := newFake(t, map[string]any{
+		"/getvideolinks": map[string]any{"result": 0, "variants": []map[string]any{
+			{"width": 1920, "height": 1080, "isoriginal": true, "videocodec": "h264", "audiocodec": "aac",
+				"videobitrate": 8000, "audiobitrate": 192, "fps": "29.97", "duration": "125.5",
+				"hosts": []string{"c1.pcloud.com"}, "path": "/orig.mp4"},
+			{"width": 1280, "height": 720, "isoriginal": false, "fps": 25, "duration": 125.5,
+				"hosts": []string{"c1.pcloud.com"}, "path": "/t720.mp4"},
+		}},
+	})
+	vs, err := c.VideoVariants(context.Background(), 77)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.form["fileid"][0] != "77" {
+		t.Fatalf("form = %v", f.form)
+	}
+	if len(vs) != 2 || !vs[0].IsOriginal || vs[1].Height != 720 {
+		t.Fatalf("variantes = %+v", vs)
+	}
+	if vs[0].DurationSeconds() != 125.5 || vs[1].DurationSeconds() != 125.5 {
+		t.Fatalf("durées = %v / %v", vs[0].DurationSeconds(), vs[1].DurationSeconds())
+	}
+	if vs[1].FPS != "25" {
+		t.Fatalf("fps = %q", vs[1].FPS)
+	}
+	u, err := c.VariantURL(vs[1])
+	if err != nil || !strings.HasSuffix(u, "c1.pcloud.com/t720.mp4") {
+		t.Fatalf("url = %q, err = %v", u, err)
+	}
+}
+
+func TestVideoLinkSendsFixedBitrateAndOptions(t *testing.T) {
+	f, c := newFake(t, map[string]any{
+		"/getvideolink": map[string]any{"result": 0, "hosts": []string{"h.pcloud.com"}, "path": "/v"},
+	})
+	u, err := c.VideoLink(context.Background(), 5, VideoOptions{Resolution: "854x480", VideoBitrate: 1500, AudioBitrate: 128})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{
+		"fileid": "5", "fixedbitrate": "1", "resolution": "854x480", "vbitrate": "1500", "abitrate": "128",
+	} {
+		if got := f.form[k]; len(got) != 1 || got[0] != want {
+			t.Errorf("%s = %v, want %s", k, got, want)
+		}
+	}
+	if !strings.HasSuffix(u, "h.pcloud.com/v") {
+		t.Fatalf("url = %q", u)
+	}
+	// Valeurs par défaut : rien d'optionnel n'est envoyé.
+	if _, err := c.VideoLink(context.Background(), 5, VideoOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"resolution", "vbitrate", "abitrate"} {
+		if _, ok := f.form[k]; ok {
+			t.Errorf("%s ne devrait pas être envoyé", k)
+		}
+	}
+}
