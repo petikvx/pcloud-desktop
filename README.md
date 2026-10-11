@@ -5,7 +5,7 @@ Serveur utilisé : `eapi.pcloud.com` (datacenter européen) uniquement.
 
 ## Fonctionnalités
 
-- **Connexion** par Google / pCloud (OAuth2), e-mail + mot de passe, ou clé API.
+- **Connexion** par e-mail + mot de passe, ou par clé API (jeton `auth` pCloud).
   Le jeton va dans le trousseau système ; le mot de passe n'est jamais stocké.
 - **Navigateur** : liste en colonnes (nom, taille, date) triable, dossiers en
   premier, fil d'Ariane cliquable, précédent / dossier parent / actualiser,
@@ -62,32 +62,18 @@ Fyne utilise cgo : il faut un compilateur C et quelques paquets système
 (Linux : `gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev`).
 Sans les en-têtes Wayland, compiler en X11 seulement : `go run -tags x11 .`.
 
-## Connexion Google / pCloud (OAuth2)
+## Compte créé avec Google
 
-Un compte créé via Google n'a pas de mot de passe pCloud : il faut passer par
-OAuth2.
-
-1. Enregistrer une application sur pCloud (https://docs.pcloud.com → *My apps*)
-   avec l'URL de redirection `http://localhost:8765/callback`.
-2. Fournir ses identifiants par l'environnement (ne jamais les commiter) :
-
-```sh
-export PCLOUD_CLIENT_ID=...
-export PCLOUD_CLIENT_SECRET=...
-# optionnel, si l'URL de redirection utilise un autre port :
-export PCLOUD_REDIRECT_PORT=8765
-go run .
-```
-
-3. Onglet « Google / pCloud » → le navigateur s'ouvre sur la page de connexion
-   pCloud, où l'on choisit Google.
+Un compte créé via « Se connecter avec Google » n'a pas de mot de passe pCloud.
+Deux possibilités : définir un mot de passe (« mot de passe oublié » sur le site
+pCloud), puis se connecter par e-mail ; ou coller le jeton `auth` dans l'onglet
+« Clé API » (il est ensuite mémorisé dans le trousseau).
 
 ## Structure
 
 - `main.go` : point d'entrée, crée la fenêtre et applique le thème.
 - `internal/pcloud/` : client de l'API pCloud, sans code d'interface.
   `client.go` (appels, erreurs), `api.go` (fichiers, transferts, miniatures), `video.go` (streaming),
-  `oauth.go` (connexion OAuth2).
 - `internal/hls/` : lecture des playlists HLS et téléchargement des segments.
 - `internal/queue/` : file d'attente séquentielle avec suivi d'état.
 - `internal/ui/` : `ui.go` (connexion), `browser.go` (navigateur et actions),

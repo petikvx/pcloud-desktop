@@ -3,7 +3,6 @@ package ui
 
 import (
 	"context"
-	"net/url"
 	"strings"
 	"time"
 
@@ -108,34 +107,14 @@ func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
 		run(30*time.Second, "Renseignez la clé API.", token == "",
 			func(ctx context.Context) error { return c.UseToken(ctx, token) })
 	}
-	loginOAuth := func() {
-		cfg := oauthConfig()
-		run(3*time.Minute, "Définissez PCLOUD_CLIENT_ID et PCLOUD_CLIENT_SECRET (voir le README).",
-			cfg.ClientID == "" || cfg.ClientSecret == "",
-			func(ctx context.Context) error {
-				return c.LoginOAuth(ctx, cfg, func(u string) error {
-					link, err := url.Parse(u)
-					if err != nil {
-						return err
-					}
-					return a.OpenURL(link)
-				})
-			})
-	}
-
-	btnOAuth := widget.NewButton("Se connecter avec Google / pCloud", loginOAuth)
-	btnOAuth.Importance = widget.HighImportance
 	btnPass := widget.NewButton("Se connecter", loginPass)
 	btnKey := widget.NewButton("Se connecter avec la clé", loginKey)
-	buttons = []*widget.Button{btnOAuth, btnPass, btnKey}
+	buttons = []*widget.Button{btnPass, btnKey}
 	pass.OnSubmitted = func(string) { loginPass() }
 	user.OnSubmitted = func(string) { loginPass() }
 	key.OnSubmitted = func(string) { loginKey() }
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Google / pCloud", container.NewVBox(
-			widget.NewLabel("Ouvre la page de connexion pCloud dans le navigateur\n(Google, Apple ou e-mail)."),
-			btnOAuth)),
 		container.NewTabItem("E-mail", container.NewVBox(user, pass, btnPass)),
 		container.NewTabItem("Clé API", container.NewVBox(key, btnKey)),
 	)

@@ -110,17 +110,17 @@ func TestListFolderParsesItems(t *testing.T) {
 	}
 }
 
-func TestOAuthTokenUsesAccessTokenParam(t *testing.T) {
+func TestTokenSentAsAuthParamAndSessionValue(t *testing.T) {
 	f, c := newFake(t, map[string]any{
 		"/userinfo": map[string]any{"result": 0},
 	})
-	if err := c.RestoreSession(context.Background(), "oauth:abc"); err != nil {
+	if err := c.RestoreSession(context.Background(), "abc"); err != nil {
 		t.Fatal(err)
 	}
-	if f.form["access_token"][0] != "abc" || len(f.form["auth"]) != 0 {
+	if f.form["auth"][0] != "abc" {
 		t.Fatalf("form = %v", f.form)
 	}
-	if c.SessionValue() != "oauth:abc" {
+	if c.SessionValue() != "abc" {
 		t.Fatalf("SessionValue = %q", c.SessionValue())
 	}
 }

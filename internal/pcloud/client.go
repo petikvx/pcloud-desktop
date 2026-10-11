@@ -44,13 +44,10 @@ func IsAuthError(err error) bool {
 // Client parle à l'API pCloud. Il n'est pas prévu pour un usage concurrent
 // pendant un Login ; ensuite, les appels sont sûrs.
 type Client struct {
-	base string
-	auth string
-	// authParam est le nom du paramètre portant le jeton : "auth" (défaut) ou
-	// "access_token" pour un jeton OAuth.
-	authParam string
-	http      *http.Client // appels d'API, avec délai
-	transfer  *http.Client // téléchargements et envois : durée bornée par le contexte
+	base     string
+	auth     string
+	http     *http.Client // appels d'API, avec délai
+	transfer *http.Client // téléchargements et envois : durée bornée par le contexte
 }
 
 func New() *Client {
@@ -70,12 +67,26 @@ func (c *Client) Auth() string { return c.auth }
 // UseToken utilise une clé API (jeton "auth") déjà obtenue, et vérifie qu'elle
 // est valide. En cas d'échec, le client reste déconnecté.
 func (c *Client) UseToken(ctx context.Context, token string) error {
-	return c.RestoreSession(ctx, token)
+	c.auth = token
+	var out struct{}
+	if err := c.call(ctx, "userinfo", nil, &out); err != nil {
+		c.auth = ""
+		return err
+	}
+	return nil
+}
+
+// SessionValue retourne ce qu'il faut mémoriser pour restaurer la session.
+func (c *Client) SessionValue() string { return c.auth }
+
+// RestoreSession reprend une valeur produite par SessionValue et vérifie le jeton.
+func (c *Client) RestoreSession(ctx context.Context, v string) error {
+	return c.UseToken(ctx, v)
 }
 
 // Login se connecte avec l'e-mail et le mot de passe, et récupère un jeton.
 func (c *Client) Login(ctx context.Context, user, pass string) error {
-	c.auth, c.authParam = "", ""
+	c.auth = ""
 	var out struct {
 		Auth string `json:"auth"`
 	}
@@ -97,11 +108,7 @@ func (c *Client) withAuth(params url.Values) url.Values {
 		params = url.Values{}
 	}
 	if c.auth != "" {
-		name := c.authParam
-		if name == "" {
-			name = "auth"
-		}
-		params.Set(name, c.auth)
+		params.Set("auth", c.auth)
 	}
 	return params
 }
