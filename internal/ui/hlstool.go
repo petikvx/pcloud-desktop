@@ -66,6 +66,75 @@ func hlsRenditionLabel(r hls.Rendition) string {
 	return name
 }
 
+// hlsAudioLabel ajoute le groupe au libellé, pour distinguer les versions
+// d'une même langue : « French, high (fr) · groupe v3a · par défaut ».
+func hlsAudioLabel(r hls.Rendition) string {
+	label := hlsRenditionLabel(r)
+	if r.GroupID == "" {
+		return label
+	}
+	// Le marqueur « par défaut » reste en fin de libellé.
+	label = strings.TrimSuffix(label, " · par défaut")
+	label += " · groupe " + r.GroupID
+	if r.Default {
+		label += " · par défaut"
+	}
+	return label
+}
+
+// sortRenditions trie par langue, puis nom, puis groupe (stable).
+func sortRenditions(rs []hls.Rendition) []hls.Rendition {
+	out := append([]hls.Rendition(nil), rs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Language != b.Language {
+			return a.Language < b.Language
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.GroupID < b.GroupID
+	})
+	return out
+}
+
+// defaultRenditions retourne les pistes à présélectionner : celles par défaut
+// du groupe de la variante, sinon la première de ce groupe, sinon la première.
+func defaultRenditions(all []hls.Rendition, group string) []hls.Rendition {
+	var inGroup, defaults []hls.Rendition
+	for _, r := range all {
+		if group != "" && r.GroupID == group {
+			inGroup = append(inGroup, r)
+			if r.Default {
+				defaults = append(defaults, r)
+			}
+		}
+	}
+	switch {
+	case len(defaults) > 0:
+		return defaults
+	case len(inGroup) > 0:
+		return inGroup[:1]
+	case len(all) > 0:
+		return all[:1]
+	}
+	return nil
+}
+
+// keepExisting garde, parmi sel, les libellés toujours présents dans options.
+func keepExisting(sel, options []string) []string {
+	var out []string
+	for _, s := range sel {
+		for _, o := range options {
+			if s == o {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // sortVariants trie par débit décroissant (meilleure qualité d'abord).
 func sortVariants(vs []hls.Variant) []hls.Variant {
 	out := append([]hls.Variant(nil), vs...)
@@ -204,47 +273,45 @@ func (b *browser) openHLSToolWith(src, name string) {
 
 	refreshGroups := func() {
 		audioOps, subOps = nil, nil
-		v, ok := selectedVariant()
-		if ok && master != nil {
-			for _, r := range master.AudioFor(v) {
-				if r.URI != "" {
-					audioOps = append(audioOps, r)
-				}
-			}
-			for _, r := range master.SubtitlesFor(v) {
-				if r.URI != "" {
-					subOps = append(subOps, r)
-				}
+		var preselect []string
+		if v, ok := selectedVariant(); ok && master != nil {
+			// Toutes les versions d'audio, tous groupes confondus : l'audio se choisit
+			// indépendamment de la qualité vidéo. Le groupe associé à la variante
+			// fournit la présélection.
+			audioOps = sortRenditions(master.AllRenditions("AUDIO"))
+			subOps = sortRenditions(master.AllRenditions("SUBTITLES"))
+			for _, r := range defaultRenditions(audioOps, v.Audio) {
+				preselect = append(preselect, hlsAudioLabel(r))
 			}
 		}
 		alabels := make([]string, len(audioOps))
-		var defaults []string
 		for i, r := range audioOps {
-			alabels[i] = hlsRenditionLabel(r)
-			if r.Default {
-				defaults = append(defaults, alabels[i])
-			}
+			alabels[i] = hlsAudioLabel(r)
 		}
-		if len(defaults) == 0 && len(alabels) > 0 {
-			defaults = alabels[:1]
-		}
+		// Un changement de qualité vidéo conserve les cases que l'utilisateur a cochées.
+		keep := audioChecks.Selected
 		audioChecks.Options = alabels
-		audioChecks.SetSelected(defaults)
+		if len(keep) > 0 {
+			audioChecks.SetSelected(keepExisting(keep, alabels))
+		} else {
+			audioChecks.SetSelected(preselect)
+		}
 		audioChecks.Refresh()
 		if len(alabels) == 0 {
 			audioNote.SetText("Aucune piste audio séparée : l'audio est inclus dans la vidéo.")
 			audioChecks.Hide()
 		} else {
-			audioNote.SetText("Chaque piste cochée est enregistrée dans son propre fichier.")
+			audioNote.SetText("Chaque piste cochée est enregistrée dans son propre fichier (ou fusionnée dans le MP4). " +
+				"Les groupes (v1a, v2a…) sont les versions d'audio déclarées par le flux, par exemple low / normal / high.")
 			audioChecks.Show()
 		}
 
 		slabels := make([]string, len(subOps))
 		for i, r := range subOps {
-			slabels[i] = hlsRenditionLabel(r)
+			slabels[i] = hlsAudioLabel(r)
 		}
 		subChecks.Options = slabels
-		subChecks.SetSelected(nil)
+		subChecks.SetSelected(keepExisting(subChecks.Selected, slabels))
 		subChecks.Refresh()
 		if len(slabels) == 0 {
 			subNote.SetText("Aucun sous-titre séparé dans ce flux.")
@@ -292,6 +359,8 @@ func (b *browser) openHLSToolWith(src, name string) {
 					variantRadio.SetSelected(labels[0])
 					status.SetText(fmt.Sprintf("%d variante(s) · %d piste(s) alternative(s).", len(m.Variants), len(m.Renditions)))
 				}
+				audioChecks.SetSelected(nil)
+				subChecks.SetSelected(nil)
 				refreshGroups()
 				choices.Show()
 			})
@@ -471,12 +540,12 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
 	jobs := []job{{label: "Vidéo", media: video}}
 	for _, r := range audio {
-		jobs = append(jobs, job{label: "Audio · " + hlsRenditionLabel(r), uri: r.URI, audio: true,
-			stem: base + "." + suffixFor(r)})
+		jobs = append(jobs, job{label: "Audio · " + hlsAudioLabel(r), uri: r.URI, audio: true,
+			stem: base + "." + suffixFor(r, audio)})
 	}
 	for _, r := range subs {
-		jobs = append(jobs, job{label: "Sous-titres · " + hlsRenditionLabel(r), uri: r.URI,
-			stem: base + "." + suffixFor(r), opt: hls.Options{WebVTT: true}})
+		jobs = append(jobs, job{label: "Sous-titres · " + hlsAudioLabel(r), uri: r.URI,
+			stem: base + "." + suffixFor(r, subs), opt: hls.Options{WebVTT: true}})
 	}
 
 	meter := newSpeedMeter()
@@ -561,13 +630,24 @@ func uniquePath(p string) string {
 }
 
 // suffixFor construit le « .<langue> » d'un fichier de piste (sans extension).
-func suffixFor(r hls.Rendition) string {
+// Quand plusieurs pistes de de même type partagent la langue (versions low / high…),
+// le groupe est ajouté pour les distinguer : « fr-v3a ».
+func suffixFor(r hls.Rendition, same []hls.Rendition) string {
 	s := safeSuffix(r.Language)
 	if s == "" {
 		s = safeSuffix(r.Name)
 	}
 	if s == "" {
 		s = "piste"
+	}
+	n := 0
+	for _, o := range same {
+		if o.Language == r.Language {
+			n++
+		}
+	}
+	if g := safeSuffix(r.GroupID); n > 1 && g != "" {
+		s += "-" + g
 	}
 	return s
 }

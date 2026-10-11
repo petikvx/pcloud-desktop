@@ -295,3 +295,52 @@ func TestOutputBaseName(t *testing.T) {
 		}
 	}
 }
+
+func TestAudioVersionsAreAllChoosable(t *testing.T) {
+	all := []hls.Rendition{
+		{GroupID: "v3a", Name: "French, high", Language: "fr", Default: true},
+		{GroupID: "v1a", Name: "English", Language: "en"},
+		{GroupID: "v1a", Name: "French, low", Language: "fr", Default: true},
+		{GroupID: "v3a", Name: "English", Language: "en"},
+	}
+	sorted := sortRenditions(all)
+	if sorted[0].Language != "en" || sorted[0].GroupID != "v1a" || sorted[1].GroupID != "v3a" {
+		t.Fatalf("tri = %+v", sorted)
+	}
+	if all[0].GroupID != "v3a" {
+		t.Fatal("l'entrée ne doit pas être modifiée")
+	}
+	if got := hlsAudioLabel(all[0]); got != "French, high (fr) · groupe v3a · par défaut" {
+		t.Fatalf("libellé = %q", got)
+	}
+	// La variante liée au groupe v1a présélectionne le français « low », pas le « high ».
+	def := defaultRenditions(sorted, "v1a")
+	if len(def) != 1 || def[0].Name != "French, low" {
+		t.Fatalf("présélection v1a = %+v", def)
+	}
+	if def := defaultRenditions(sorted, "inconnu"); len(def) != 1 {
+		t.Fatalf("repli sur la première piste attendu : %+v", def)
+	}
+	if defaultRenditions(nil, "v1a") != nil {
+		t.Fatal("aucune piste : nil attendu")
+	}
+}
+
+func TestSuffixForDisambiguatesSameLanguage(t *testing.T) {
+	fr1 := hls.Rendition{Language: "fr", GroupID: "v1a"}
+	fr3 := hls.Rendition{Language: "fr", GroupID: "v3a"}
+	en := hls.Rendition{Language: "en", GroupID: "v3a"}
+	both := []hls.Rendition{fr1, fr3, en}
+	if got := suffixFor(fr1, both); got != "fr-v1a" {
+		t.Errorf("fr1 = %q", got)
+	}
+	if got := suffixFor(fr3, both); got != "fr-v3a" {
+		t.Errorf("fr3 = %q", got)
+	}
+	if got := suffixFor(en, both); got != "en" {
+		t.Errorf("une seule piste anglaise : %q", got)
+	}
+	if got := keepExisting([]string{"a", "x", "b"}, []string{"b", "a"}); len(got) != 2 {
+		t.Errorf("keepExisting = %v", got)
+	}
+}

@@ -18,7 +18,8 @@ Serveur utilisé : `eapi.pcloud.com` (datacenter européen) uniquement.
   pistes audio ; le fichier original, lui, les conserve toutes.
 - **Outil « Flux HLS »** (bouton de la barre d'outils) : lit un `master.m3u8`
   (URL ou fichier local) et télécharge le flux, en Go pur, sans yt-dlp.
-  Choix de la qualité, des **pistes audio par langue** et des sous-titres ;
+  Choix de la qualité, des **pistes audio par langue et par version**
+  (low / normal / high, indépendamment de la qualité vidéo) et des sous-titres ;
   segments téléchargés en parallèle (réglable, 6 par défaut, comme `yt-dlp -N`),
   chiffrement AES-128 géré. Si ffmpeg est
   installé, le résultat est assemblé en un seul **MP4** (sans ré-encodage) avec

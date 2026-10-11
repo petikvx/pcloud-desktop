@@ -395,3 +395,37 @@ func TestDefaultParallel(t *testing.T) {
 		t.Fatalf("parallélisme par défaut = %d, attendu 6", NewDownloader().Parallel)
 	}
 }
+
+const multiAudioMaster = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v1a",NAME="English",LANGUAGE="en",URI="a/en1.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v1a",NAME="French, low",LANGUAGE="fr",DEFAULT=YES,URI="a/fr1.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v3a",NAME="English",LANGUAGE="en",URI="a/en3.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v3a",NAME="French, high",LANGUAGE="fr",DEFAULT=YES,URI="a/fr3.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="v9a",NAME="Dup",LANGUAGE="fr",URI="a/fr3.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=2628000,RESOLUTION=960x540,AUDIO="v1a"
+540/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5192000,RESOLUTION=1920x1080,AUDIO="v3a"
+1080/index.m3u8
+`
+
+func TestAllRenditionsSpansGroupsWithoutDuplicates(t *testing.T) {
+	m, _ := mustParse(t, multiAudioMaster, "https://h.example/m/master.m3u8")
+	all := m.AllRenditions("AUDIO")
+	if len(all) != 4 {
+		t.Fatalf("pistes = %d, attendu 4 (doublon d'URI retiré) : %+v", len(all), all)
+	}
+	// La variante 540p ne voit que son groupe, mais toutes les versions restent choisissables.
+	if got := len(m.AudioFor(m.Variants[0])); got != 2 {
+		t.Fatalf("AudioFor(540p) = %d pistes", got)
+	}
+	groups := map[string]bool{}
+	for _, r := range all {
+		groups[r.GroupID] = true
+	}
+	if !groups["v1a"] || !groups["v3a"] || groups["v9a"] {
+		t.Fatalf("groupes = %v", groups)
+	}
+	if len(m.AllRenditions("SUBTITLES")) != 0 {
+		t.Fatal("aucun sous-titre attendu")
+	}
+}

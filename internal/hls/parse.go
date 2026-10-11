@@ -54,6 +54,23 @@ func (m *Master) AudioFor(v Variant) []Rendition { return m.group("AUDIO", v.Aud
 // SubtitlesFor retourne les sous-titres du groupe de la variante.
 func (m *Master) SubtitlesFor(v Variant) []Rendition { return m.group("SUBTITLES", v.Subtitles) }
 
+// AllRenditions retourne toutes les pistes d'un type (AUDIO, SUBTITLES…) tous
+// groupes confondus, sans doublon d'URI. Un master peut déclarer plusieurs
+// versions d'une même langue (par exemple un groupe par qualité audio) : c'est
+// ce qui permet de choisir l'audio indépendamment de la vidéo.
+func (m *Master) AllRenditions(typ string) []Rendition {
+	seen := map[string]bool{}
+	var out []Rendition
+	for _, r := range m.Renditions {
+		if r.Type != typ || r.URI == "" || seen[r.URI] {
+			continue
+		}
+		seen[r.URI] = true
+		out = append(out, r)
+	}
+	return out
+}
+
 func (m *Master) group(typ, id string) []Rendition {
 	if id == "" {
 		return nil
