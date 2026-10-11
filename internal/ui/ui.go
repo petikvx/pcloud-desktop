@@ -3,176 +3,149 @@ package ui
 
 import (
 	"context"
-	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/zalando/go-keyring"
 
 	"pcloud-desktop/internal/pcloud"
 )
 
-const (
-	keyringService = "pcloud-desktop"
-	keyringUser    = "session"
-)
-
 // Start affiche l'écran de connexion, ou ouvre directement le navigateur si
 // un jeton valide est stocké dans le trousseau système.
 func Start(a fyne.App, w fyne.Window, c *pcloud.Client) {
-	if host, token, ok := loadSession(); ok {
-		w.SetContent(widget.NewLabel("Reconnexion…"))
+	if value, ok := loadSession(); ok {
+		w.SetContent(container.NewCenter(widget.NewLabel("Reconnexion…")))
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			if err := c.Restore(ctx, host, token); err == nil {
-				showBrowser(w, c)
-				return
+			err := c.RestoreSession(ctx, value)
+			if err != nil {
+				_ = keyring.Delete(keyringService, keyringUser)
 			}
-			_ = keyring.Delete(keyringService, keyringUser)
-			showLogin(w, c)
+			fyne.Do(func() {
+				if err == nil {
+					showBrowser(a, w, c)
+				} else {
+					showLogin(a, w, c, "")
+				}
+			})
 		}()
 		return
 	}
-	showLogin(w, c)
+	showLogin(a, w, c, "")
 }
 
-func showLogin(w fyne.Window, c *pcloud.Client) {
+// showLogin affiche l'écran de connexion ; notice est un message d'information
+// (par exemple « session expirée »).
+func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
+	status := widget.NewLabel(notice)
+	status.Wrapping = fyne.TextWrapWord
+	status.Alignment = fyne.TextAlignCenter
+	setStatus := func(msg string, isError bool) {
+		status.SetText(msg)
+		if isError {
+			status.Importance = widget.DangerImportance
+		} else {
+			status.Importance = widget.MediumImportance
+		}
+		status.Refresh()
+	}
+	bar := widget.NewProgressBarInfinite()
+	bar.Hide()
+
 	user := widget.NewEntry()
 	user.SetPlaceHolder("Adresse e-mail")
 	pass := widget.NewPasswordEntry()
 	pass.SetPlaceHolder("Mot de passe")
-	status := widget.NewLabel("")
-	bar := widget.NewProgressBarInfinite()
-	bar.Hide()
+	key := widget.NewPasswordEntry()
+	key.SetPlaceHolder("Clé API (jeton auth)")
 
-	var btn *widget.Button
-	submit := func() {
-		if user.Text == "" || pass.Text == "" {
-			status.SetText("Renseignez l'e-mail et le mot de passe.")
+	var buttons []*widget.Button
+	// run exécute une connexion hors du thread d'interface.
+	run := func(timeout time.Duration, missing string, empty bool, do func(context.Context) error) {
+		if empty {
+			setStatus(missing, true)
 			return
 		}
-		btn.Disable()
+		for _, b := range buttons {
+			b.Disable()
+		}
 		bar.Show()
-		status.SetText("")
+		setStatus("", false)
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			err := c.Login(ctx, user.Text, pass.Text)
-			bar.Hide()
-			btn.Enable()
-			if err != nil {
-				status.SetText("Échec de connexion : " + err.Error())
-				return
+			err := do(ctx)
+			if err == nil {
+				saveSession(c.SessionValue())
 			}
-			saveSession(c.Host(), c.Auth())
-			showBrowser(w, c)
-		}()
-	}
-	btn = widget.NewButton("Se connecter", submit)
-	pass.OnSubmitted = func(string) { submit() }
-
-	form := container.NewVBox(
-		widget.NewLabelWithStyle("pCloud", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		user, pass, btn, bar, status,
-	)
-	w.SetContent(container.NewCenter(container.NewGridWrap(fyne.NewSize(360, 260), form)))
-}
-
-// pathEntry mémorise un dossier visité pour pouvoir remonter.
-type pathEntry struct {
-	id   uint64
-	name string
-}
-
-func showBrowser(w fyne.Window, c *pcloud.Client) {
-	var (
-		stack = []pathEntry{{0, "/"}}
-		items []pcloud.Item
-	)
-
-	title := widget.NewLabel("/")
-	status := widget.NewLabel("")
-
-	list := widget.NewList(
-		func() int { return len(items) + 1 }, // +1 pour la ligne « .. »
-		func() fyne.CanvasObject {
-			return container.NewBorder(nil, nil, widget.NewIcon(nil), widget.NewLabel(""), widget.NewLabel(""))
-		},
-		nil,
-	)
-
-	var load func()
-	load = func() {
-		cur := stack[len(stack)-1]
-		title.SetText(pathString(stack))
-		status.SetText("Chargement…")
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			res, err := c.ListFolder(ctx, cur.id)
-			if err != nil {
-				status.SetText("")
-				dialog.ShowError(err, w)
-				return
-			}
-			items = res
-			status.SetText(fmt.Sprintf("%d élément(s)", len(res)))
-			list.UnselectAll()
-			list.Refresh()
+			fyne.Do(func() {
+				bar.Hide()
+				for _, b := range buttons {
+					b.Enable()
+				}
+				if err != nil {
+					setStatus("Échec de connexion : "+err.Error(), true)
+					return
+				}
+				showBrowser(a, w, c)
+			})
 		}()
 	}
 
-	list.UpdateItem = func(i widget.ListItemID, o fyne.CanvasObject) {
-		row := o.(*fyne.Container)
-		name := row.Objects[0].(*widget.Label)
-		icon := row.Objects[1].(*widget.Icon)
-		size := row.Objects[2].(*widget.Label)
-		if i == 0 {
-			name.SetText("..")
-			icon.SetResource(iconFolder())
-			size.SetText("")
-			return
-		}
-		it := items[i-1]
-		name.SetText(it.Name)
-		if it.IsFolder {
-			icon.SetResource(iconFolder())
-			size.SetText("")
-		} else {
-			icon.SetResource(iconFile())
-			size.SetText(humanSize(it.Size))
-		}
+	loginPass := func() {
+		run(30*time.Second, "Renseignez l'e-mail et le mot de passe.", user.Text == "" || pass.Text == "",
+			func(ctx context.Context) error { return c.Login(ctx, user.Text, pass.Text) })
+	}
+	loginKey := func() {
+		token := strings.TrimSpace(key.Text)
+		run(30*time.Second, "Renseignez la clé API.", token == "",
+			func(ctx context.Context) error { return c.UseToken(ctx, token) })
+	}
+	loginOAuth := func() {
+		cfg := oauthConfig()
+		run(3*time.Minute, "Définissez PCLOUD_CLIENT_ID et PCLOUD_CLIENT_SECRET (voir le README).",
+			cfg.ClientID == "" || cfg.ClientSecret == "",
+			func(ctx context.Context) error {
+				return c.LoginOAuth(ctx, cfg, func(u string) error {
+					link, err := url.Parse(u)
+					if err != nil {
+						return err
+					}
+					return a.OpenURL(link)
+				})
+			})
 	}
 
-	list.OnSelected = func(i widget.ListItemID) {
-		if i == 0 {
-			if len(stack) > 1 {
-				stack = stack[:len(stack)-1]
-				load()
-			}
-			list.UnselectAll()
-			return
-		}
-		it := items[i-1]
-		if it.IsFolder {
-			stack = append(stack, pathEntry{it.FolderID, it.Name})
-			load()
-			return
-		}
-		list.UnselectAll()
-		// TODO : proposer le téléchargement (méthode getfilelink).
-	}
+	btnOAuth := widget.NewButton("Se connecter avec Google / pCloud", loginOAuth)
+	btnOAuth.Importance = widget.HighImportance
+	btnPass := widget.NewButton("Se connecter", loginPass)
+	btnKey := widget.NewButton("Se connecter avec la clé", loginKey)
+	buttons = []*widget.Button{btnOAuth, btnPass, btnKey}
+	pass.OnSubmitted = func(string) { loginPass() }
+	user.OnSubmitted = func(string) { loginPass() }
+	key.OnSubmitted = func(string) { loginKey() }
 
-	logout := widget.NewButton("Déconnexion", func() {
-		_ = keyring.Delete(keyringService, keyringUser)
-		showLogin(w, pcloud.New())
-	})
+	tabs := container.NewAppTabs(
+		container.NewTabItem("Google / pCloud", container.NewVBox(
+			widget.NewLabel("Ouvre la page de connexion pCloud dans le navigateur\n(Google, Apple ou e-mail)."),
+			btnOAuth)),
+		container.NewTabItem("E-mail", container.NewVBox(user, pass, btnPass)),
+		container.NewTabItem("Clé API", container.NewVBox(key, btnKey)),
+	)
 
-	top := container.NewBorder(nil, nil, nil, logout, title)
-	w.SetContent(container.NewBorder(top, status, nil, nil, list))
-	load()
+	title := canvas.NewText("pCloud", pcloudBlue)
+	title.TextSize = 36
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.Alignment = fyne.TextAlignCenter
+	subtitle := widget.NewLabelWithStyle("Client de bureau · eapi.pcloud.com", fyne.TextAlignCenter, fyne.TextStyle{})
+
+	form := container.NewVBox(title, subtitle, tabs, bar, status)
+	w.SetContent(container.NewCenter(container.NewGridWrap(fyne.NewSize(400, 340), form)))
 }

@@ -7,16 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
 
-const (
-	hostEU = "eapi.pcloud.com"
-	hostUS = "api.pcloud.com"
-)
+// defaultBase est le datacenter européen, seul utilisé par ce client.
+const defaultBase = "https://eapi.pcloud.com"
 
 // APIError est renvoyée quand pCloud répond avec un "result" différent de 0.
 type APIError struct {
@@ -28,99 +27,88 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("pCloud (code %d) : %s", e.Code, e.Message)
 }
 
-// Item est un fichier ou un dossier.
-type Item struct {
-	Name     string `json:"name"`
-	IsFolder bool   `json:"isfolder"`
-	FolderID uint64 `json:"folderid"`
-	FileID   uint64 `json:"fileid"`
-	Size     int64  `json:"size"`
-	Modified string `json:"modified"`
+// IsAuthError indique que le jeton est absent, invalide ou expiré : il faut
+// se reconnecter.
+func IsAuthError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.Code {
+	case 1000, 2000, 2094, 2095:
+		return true
+	}
+	return false
 }
 
 // Client parle à l'API pCloud. Il n'est pas prévu pour un usage concurrent
-// pendant un Login ; ensuite, les appels de lecture sont sûrs.
+// pendant un Login ; ensuite, les appels sont sûrs.
 type Client struct {
-	host string
+	base string
 	auth string
-	http *http.Client
+	// authParam est le nom du paramètre portant le jeton : "auth" (défaut) ou
+	// "access_token" pour un jeton OAuth.
+	authParam string
+	http      *http.Client // appels d'API, avec délai
+	transfer  *http.Client // téléchargements et envois : durée bornée par le contexte
 }
 
 func New() *Client {
 	return &Client{
-		host: hostEU,
-		http: &http.Client{Timeout: 30 * time.Second},
+		base:     defaultBase,
+		http:     &http.Client{Timeout: 30 * time.Second},
+		transfer: &http.Client{},
 	}
 }
 
 // Auth retourne le jeton d'authentification courant (vide si non connecté).
 func (c *Client) Auth() string { return c.auth }
 
-// Restore réutilise un jeton déjà obtenu, et vérifie qu'il est toujours valide.
-func (c *Client) Restore(ctx context.Context, host, token string) error {
-	c.host, c.auth = host, token
-	var out struct{}
-	return c.call(ctx, "userinfo", nil, &out)
+// UseToken utilise une clé API (jeton "auth") déjà obtenue, et vérifie qu'elle
+// est valide. En cas d'échec, le client reste déconnecté.
+func (c *Client) UseToken(ctx context.Context, token string) error {
+	return c.RestoreSession(ctx, token)
 }
 
-// Host retourne le datacenter utilisé (EU ou US).
-func (c *Client) Host() string { return c.host }
-
-// Login essaie le datacenter européen puis américain : un compte n'existe que
-// sur l'un des deux.
+// Login se connecte avec l'e-mail et le mot de passe, et récupère un jeton.
 func (c *Client) Login(ctx context.Context, user, pass string) error {
-	var lastErr error
-	for _, host := range []string{hostEU, hostUS} {
-		c.host, c.auth = host, ""
-		var out struct {
-			Auth string `json:"auth"`
-		}
-		err := c.call(ctx, "userinfo", url.Values{
-			"getauth":  {"1"},
-			"username": {user},
-			"password": {pass},
-		}, &out)
-		if err == nil {
-			c.auth = out.Auth
-			return nil
-		}
-		lastErr = err
-		var apiErr *APIError
-		// 2000 = identifiants refusés (peut-être le mauvais datacenter) : on tente l'autre.
-		if !errors.As(err, &apiErr) || apiErr.Code != 2000 {
-			return err
-		}
-	}
-	return lastErr
-}
-
-// ListFolder liste le contenu d'un dossier (0 = racine).
-func (c *Client) ListFolder(ctx context.Context, folderID uint64) ([]Item, error) {
+	c.auth, c.authParam = "", ""
 	var out struct {
-		Metadata struct {
-			Contents []Item `json:"contents"`
-		} `json:"metadata"`
+		Auth string `json:"auth"`
 	}
-	err := c.call(ctx, "listfolder", url.Values{
-		"folderid": {fmt.Sprint(folderID)},
+	err := c.call(ctx, "userinfo", url.Values{
+		"getauth":  {"1"},
+		"username": {user},
+		"password": {pass},
 	}, &out)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return out.Metadata.Contents, nil
+	c.auth = out.Auth
+	return nil
+}
+
+// withAuth ajoute le jeton aux paramètres.
+func (c *Client) withAuth(params url.Values) url.Values {
+	if params == nil {
+		params = url.Values{}
+	}
+	if c.auth != "" {
+		name := c.authParam
+		if name == "" {
+			name = "auth"
+		}
+		params.Set(name, c.auth)
+	}
+	return params
 }
 
 // call exécute une méthode de l'API. Les paramètres partent en POST (corps du
 // formulaire) pour que mot de passe et jeton ne figurent pas dans les URL.
 func (c *Client) call(ctx context.Context, method string, params url.Values, out any) error {
-	if params == nil {
-		params = url.Values{}
-	}
-	if c.auth != "" {
-		params.Set("auth", c.auth)
-	}
+	params = c.withAuth(params)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://"+c.host+"/"+method, strings.NewReader(params.Encode()))
+		c.base+"/"+method, strings.NewReader(params.Encode()))
 	if err != nil {
 		return err
 	}
@@ -131,9 +119,13 @@ func (c *Client) call(ctx context.Context, method string, params url.Values, out
 		return err
 	}
 	defer resp.Body.Close()
+	return decodeAPI(resp.Body, out)
+}
 
+// decodeAPI lit une réponse JSON de pCloud et la convertit en erreur si besoin.
+func decodeAPI(r io.Reader, out any) error {
 	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(r).Decode(&raw); err != nil {
 		return fmt.Errorf("réponse illisible : %w", err)
 	}
 	var head struct {
@@ -145,6 +137,9 @@ func (c *Client) call(ctx context.Context, method string, params url.Values, out
 	}
 	if head.Result != 0 {
 		return &APIError{Code: head.Result, Message: head.Error}
+	}
+	if out == nil {
+		return nil
 	}
 	return json.Unmarshal(raw, out)
 }

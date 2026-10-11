@@ -1,52 +1,40 @@
 package ui
 
 import (
-	"fmt"
-	"strings"
+	"os"
+	"strconv"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/theme"
 	"github.com/zalando/go-keyring"
+
+	"pcloud-desktop/internal/pcloud"
 )
 
-func iconFolder() fyne.Resource { return theme.FolderIcon() }
-func iconFile() fyne.Resource   { return theme.FileIcon() }
+const (
+	keyringService = "pcloud-desktop"
+	keyringUser    = "session"
+)
 
-func pathString(stack []pathEntry) string {
-	if len(stack) == 1 {
-		return "/"
-	}
-	parts := make([]string, 0, len(stack)-1)
-	for _, e := range stack[1:] {
-		parts = append(parts, e.name)
-	}
-	return "/" + strings.Join(parts, "/")
+// Le jeton (clé API ou OAuth, jamais le mot de passe) est stocké dans le
+// trousseau système.
+func saveSession(value string) {
+	_ = keyring.Set(keyringService, keyringUser, value)
 }
 
-func humanSize(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d o", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %co", float64(n)/float64(div), "KMGTPE"[exp])
+func loadSession() (value string, ok bool) {
+	value, err := keyring.Get(keyringService, keyringUser)
+	return value, err == nil && value != ""
 }
 
-// La session (datacenter + jeton) est stockée dans le trousseau système,
-// jamais le mot de passe.
-func saveSession(host, token string) {
-	_ = keyring.Set(keyringService, keyringUser, host+"|"+token)
-}
-
-func loadSession() (host, token string, ok bool) {
-	v, err := keyring.Get(keyringService, keyringUser)
-	if err != nil {
-		return "", "", false
+// oauthConfig lit l'application pCloud dans l'environnement : le secret ne
+// doit jamais être commité.
+func oauthConfig() pcloud.OAuthConfig {
+	cfg := pcloud.OAuthConfig{
+		ClientID:     os.Getenv("PCLOUD_CLIENT_ID"),
+		ClientSecret: os.Getenv("PCLOUD_CLIENT_SECRET"),
+		Port:         8765,
 	}
-	host, token, ok = strings.Cut(v, "|")
-	return host, token, ok && host != "" && token != ""
+	if p, err := strconv.Atoi(os.Getenv("PCLOUD_REDIRECT_PORT")); err == nil && p > 0 {
+		cfg.Port = p
+	}
+	return cfg
 }
