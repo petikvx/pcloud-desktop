@@ -148,3 +148,13 @@ func TestStreamFileName(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestVersionLabel(t *testing.T) {
+	defer func(v string) { Version = v }(Version)
+	for in, want := range map[string]string{"": "dev", "dev": "dev", "0.1.0": "v0.1.0", "v0.2.0": "v0.2.0"} {
+		Version = in
+		if got := VersionLabel(); got != want {
+			t.Errorf("Version=%q : %q, want %q", in, got, want)
+		}
+	}
+}

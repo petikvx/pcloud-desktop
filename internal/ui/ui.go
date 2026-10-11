@@ -123,7 +123,7 @@ func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
 	title.TextSize = 36
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.Alignment = fyne.TextAlignCenter
-	subtitle := widget.NewLabelWithStyle("Client de bureau · eapi.pcloud.com", fyne.TextAlignCenter, fyne.TextStyle{})
+	subtitle := widget.NewLabelWithStyle("Client de bureau · eapi.pcloud.com · "+VersionLabel(), fyne.TextAlignCenter, fyne.TextStyle{})
 
 	form := container.NewVBox(title, subtitle, tabs, bar, status)
 	w.SetContent(container.NewCenter(container.NewGridWrap(fyne.NewSize(400, 340), form)))

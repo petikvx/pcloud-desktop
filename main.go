@@ -26,11 +26,13 @@ func main() {
 		}
 	}
 
+	ui.Version = version
+
 	a := app.NewWithID("fr.krmr.pcloud-desktop")
 	a.SetIcon(fyne.NewStaticResource("icon.png", iconPNG))
 	a.Settings().SetTheme(ui.NewTheme())
 
-	w := a.NewWindow("pCloud Desktop")
+	w := a.NewWindow("pCloud Desktop " + ui.VersionLabel())
 	w.Resize(fyne.NewSize(900, 600))
 
 	ui.Start(a, w, pcloud.New())

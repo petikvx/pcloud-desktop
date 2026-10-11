@@ -162,7 +162,9 @@ func (b *browser) build() {
 	b.quotaLabel = widget.NewLabel("")
 	b.quotaBar = widget.NewProgressBar()
 	b.quotaBar.TextFormatter = func() string { return "" }
-	quota := container.NewHBox(b.quotaLabel, container.NewGridWrap(fyne.NewSize(140, b.quotaBar.MinSize().Height), b.quotaBar))
+	version := widget.NewLabel(VersionLabel())
+	version.Importance = widget.LowImportance
+	quota := container.NewHBox(b.quotaLabel, container.NewGridWrap(fyne.NewSize(140, b.quotaBar.MinSize().Height), b.quotaBar), version)
 	bottom := container.NewBorder(nil, nil, b.status, quota)
 
 	top := container.NewVBox(toolbar, b.search, header)

@@ -1,8 +1,21 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/zalando/go-keyring"
 )
+
+// Version est la version de l'application, renseignée par main.
+var Version = "dev"
+
+// VersionLabel retourne la version pour l'affichage : « v0.1.0 », ou « dev ».
+func VersionLabel() string {
+	if Version == "" || Version == "dev" {
+		return "dev"
+	}
+	return "v" + strings.TrimPrefix(Version, "v")
+}
 
 const (
 	keyringService = "pcloud-desktop"
