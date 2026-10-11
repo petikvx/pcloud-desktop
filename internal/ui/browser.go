@@ -120,12 +120,13 @@ func (b *browser) build() {
 		pos := b.a.Driver().AbsolutePositionForObject(upload)
 		widget.ShowPopUpMenuAtPosition(menu, b.w.Canvas(), pos.Add(fyne.NewPos(0, upload.Size().Height)))
 	})
+	hlsTool := widget.NewButtonWithIcon("Flux HLS", theme.MediaVideoIcon(), b.openHLSTool)
 	logout := widget.NewButtonWithIcon("Déconnexion", theme.LogoutIcon(), b.logout)
 
 	b.crumbs = container.NewHBox()
 	toolbar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backBtn, b.upBtn, refresh),
-		container.NewHBox(newFolder, upload, logout),
+		container.NewHBox(newFolder, upload, hlsTool, logout),
 		container.NewHScroll(b.crumbs),
 	)
 
