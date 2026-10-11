@@ -17,10 +17,13 @@ import (
 	"time"
 )
 
+// DefaultParallel est le nombre de segments téléchargés simultanément par défaut.
+const DefaultParallel = 6
+
 // Downloader récupère des playlists et des segments.
 type Downloader struct {
 	Client   *http.Client
-	Parallel int // segments téléchargés simultanément (défaut 4)
+	Parallel int // segments téléchargés simultanément (défaut DefaultParallel)
 	Retries  int // essais supplémentaires par segment (défaut 2)
 
 	mu   sync.Mutex
@@ -29,12 +32,14 @@ type Downloader struct {
 
 // NewDownloader retourne un Downloader aux réglages par défaut.
 func NewDownloader() *Downloader {
-	return &Downloader{Client: &http.Client{}, Parallel: 4, Retries: 2}
+	return &Downloader{Client: &http.Client{}, Parallel: DefaultParallel, Retries: 2}
 }
 
 // get lit une ressource http(s) ou un fichier local (chemin ou file://).
 // rng non nul : demande la plage [off, off+length).
-func (d *Downloader) get(ctx context.Context, raw string, off, length int64) ([]byte, error) {
+// onBytes (facultatif) est appelé au fil de la lecture, parfois depuis
+// plusieurs goroutines : il doit être sûr en concurrence.
+func (d *Downloader) get(ctx context.Context, raw string, off, length int64, onBytes func(n int)) ([]byte, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, err
@@ -47,6 +52,9 @@ func (d *Downloader) get(ctx context.Context, raw string, off, length int64) ([]
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
+		}
+		if onBytes != nil {
+			onBytes(len(data))
 		}
 		return slice(data, off, length)
 	}
@@ -65,7 +73,11 @@ func (d *Downloader) get(ctx context.Context, raw string, off, length int64) ([]
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return nil, fmt.Errorf("%s : %s", raw, resp.Status)
 	}
-	data, err := io.ReadAll(resp.Body)
+	var body io.Reader = resp.Body
+	if onBytes != nil {
+		body = &countingReader{r: resp.Body, on: onBytes}
+	}
+	data, err := io.ReadAll(body)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +86,20 @@ func (d *Downloader) get(ctx context.Context, raw string, off, length int64) ([]
 		return slice(data, off, length)
 	}
 	return data, nil
+}
+
+// countingReader signale les octets lus.
+type countingReader struct {
+	r  io.Reader
+	on func(n int)
+}
+
+func (c *countingReader) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	if n > 0 {
+		c.on(n)
+	}
+	return n, err
 }
 
 func slice(data []byte, off, length int64) ([]byte, error) {
@@ -89,7 +115,7 @@ func slice(data []byte, off, length int64) ([]byte, error) {
 // FetchPlaylist télécharge (ou lit) et analyse une playlist. raw est une URL
 // http(s) ou un chemin de fichier local.
 func (d *Downloader) FetchPlaylist(ctx context.Context, raw string) (*Master, *Media, error) {
-	data, err := d.get(ctx, raw, 0, 0)
+	data, err := d.get(ctx, raw, 0, 0, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,6 +141,11 @@ func baseURL(raw string) (*url.URL, error) {
 
 // Options règle un téléchargement.
 type Options struct {
+	// OnBytes (facultatif) reçoit les octets reçus du réseau au fil de l'eau,
+	// depuis plusieurs goroutines : il doit être sûr en concurrence. Les
+	// reprises après erreur comptent à nouveau les octets relus.
+	OnBytes func(n int)
+
 	// WebVTT retire les en-têtes « WEBVTT » répétés quand on concatène des
 	// segments de sous-titres.
 	WebVTT bool
@@ -127,7 +158,7 @@ func (d *Downloader) Download(ctx context.Context, m *Media, w io.Writer, opt Op
 		return errors.New("flux en direct (sans #EXT-X-ENDLIST) : non géré")
 	}
 	if m.Init != nil {
-		data, err := d.get(ctx, m.Init.URI, m.Init.Offset, m.Init.Length)
+		data, err := d.get(ctx, m.Init.URI, m.Init.Offset, m.Init.Length, opt.OnBytes)
 		if err != nil {
 			return fmt.Errorf("segment d'initialisation : %w", err)
 		}
@@ -162,7 +193,7 @@ func (d *Downloader) Download(ctx context.Context, m *Media, w io.Writer, opt Op
 				return
 			}
 			go func(i int) {
-				data, err := d.segment(ctx, m.Segments[i])
+				data, err := d.segment(ctx, m.Segments[i], opt.OnBytes)
 				results[i] <- result{data, err}
 			}(i)
 		}
@@ -194,7 +225,7 @@ func (d *Downloader) Download(ctx context.Context, m *Media, w io.Writer, opt Op
 }
 
 // segment télécharge un segment avec quelques essais, et le déchiffre.
-func (d *Downloader) segment(ctx context.Context, s Segment) ([]byte, error) {
+func (d *Downloader) segment(ctx context.Context, s Segment, onBytes func(n int)) ([]byte, error) {
 	var data []byte
 	var err error
 	for attempt := 0; attempt <= d.Retries; attempt++ {
@@ -205,7 +236,7 @@ func (d *Downloader) segment(ctx context.Context, s Segment) ([]byte, error) {
 				return nil, ctx.Err()
 			}
 		}
-		data, err = d.get(ctx, s.URI, s.Offset, s.Length)
+		data, err = d.get(ctx, s.URI, s.Offset, s.Length, onBytes)
 		if err == nil {
 			break
 		}
@@ -235,26 +266,25 @@ func (d *Downloader) decrypt(ctx context.Context, data []byte, s Segment) ([]byt
 	return decryptAES128(data, key, iv)
 }
 
+// key retourne la clé de déchiffrement. La récupération se fait sous verrou :
+// quand plusieurs segments démarrent ensemble, une seule requête part.
 func (d *Downloader) key(ctx context.Context, uri string) ([]byte, error) {
 	d.mu.Lock()
-	k, ok := d.keys[uri]
-	d.mu.Unlock()
-	if ok {
+	defer d.mu.Unlock()
+	if k, ok := d.keys[uri]; ok {
 		return k, nil
 	}
-	k, err := d.get(ctx, uri, 0, 0)
+	k, err := d.get(ctx, uri, 0, 0, nil)
 	if err != nil {
 		return nil, err
 	}
 	if len(k) != 16 {
 		return nil, fmt.Errorf("clé de %d octets (16 attendus)", len(k))
 	}
-	d.mu.Lock()
 	if d.keys == nil {
 		d.keys = map[string][]byte{}
 	}
 	d.keys[uri] = k
-	d.mu.Unlock()
 	return k, nil
 }
 

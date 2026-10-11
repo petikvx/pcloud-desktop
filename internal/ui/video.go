@@ -211,12 +211,10 @@ func (b *browser) saveStream(it pcloud.Item, fileName string, link func(ctx cont
 			if err != nil {
 				return err
 			}
+			meter := newSpeedMeter()
 			return b.c.DownloadURL(ctx, u, wc, func(done, total int64) {
-				text := fileName + " · " + humanSize(done)
-				if total > 0 {
-					text += " / " + humanSize(total)
-				}
-				report(text, fraction(done, total))
+				meter.Set(done)
+				report(progressText(fileName, done, total, meter.Rate()), fraction(done, total))
 			})
 		})
 	}, b.w)

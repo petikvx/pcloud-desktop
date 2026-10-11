@@ -22,6 +22,9 @@ import (
 	"pcloud-desktop/internal/hls"
 )
 
+// prefHLSParallel est la clé de préférence du nombre de connexions parallèles.
+const prefHLSParallel = "hls.parallel"
+
 // ---------------------------------------------------------------- logique pure
 
 // hlsVariantLabel décrit une variante : « 1280×720 · 2.5 Mb/s · 30 i/s · avc1…,mp4a… ».
@@ -308,6 +311,16 @@ func (b *browser) openHLSToolWith(src, name string) {
 		fd.Show()
 	})
 
+	parallelOptions := []string{"1", "2", "4", "6", "8", "12", "16"}
+	parallel := widget.NewSelect(parallelOptions, func(v string) {
+		b.a.Preferences().SetInt(prefHLSParallel, atoiOr(v, hls.DefaultParallel))
+	})
+	parallel.SetSelected(fmt.Sprint(b.a.Preferences().IntWithFallback(prefHLSParallel, hls.DefaultParallel)))
+	if parallel.Selected == "" {
+		parallel.SetSelected(fmt.Sprint(hls.DefaultParallel))
+	}
+	parallelRow := container.NewBorder(nil, nil, widget.NewLabel("Connexions parallèles (comme yt-dlp -N)"), nil, parallel)
+
 	ffmpeg, _ := exec.LookPath("ffmpeg")
 	convert := widget.NewCheck("Convertir en MP4 et fusionner audio / sous-titres (ffmpeg)", nil)
 	note := widget.NewLabel("")
@@ -324,7 +337,7 @@ func (b *browser) openHLSToolWith(src, name string) {
 
 	content := container.NewGridWrap(fyne.NewSize(600, 480), container.NewVScroll(container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(pickFile, analyseBtn), entry),
-		status, choices, widget.NewSeparator(), convert, note,
+		status, choices, widget.NewSeparator(), parallelRow, convert, note,
 	)))
 
 	d := dialog.NewCustomConfirm("Lire un flux HLS (master.m3u8)", "Télécharger", "Fermer", content, func(ok bool) {
@@ -354,6 +367,7 @@ func (b *browser) openHLSToolWith(src, name string) {
 			}
 			videoURL = v.URI
 		}
+		dl.Parallel = atoiOr(parallel.Selected, hls.DefaultParallel)
 		merge := ""
 		if convert.Checked {
 			merge = ffmpeg
@@ -465,6 +479,7 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 			stem: base + "." + suffixFor(r), opt: hls.Options{WebVTT: true}})
 	}
 
+	meter := newSpeedMeter()
 	var files []string
 	for i, j := range jobs {
 		m := j.media
@@ -489,9 +504,12 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 			}
 			w = f
 		}
-		err := dl.Download(ctx, m, w, j.opt, func(n, total int) {
+		opt := j.opt
+		opt.OnBytes = func(n int) { meter.Add(int64(n)) }
+		startBytes := meter.Total()
+		err := dl.Download(ctx, m, w, opt, func(n, total int) {
 			frac := (float64(i) + float64(n)/float64(total)) / float64(len(jobs))
-			report(fmt.Sprintf("%s · segment %d/%d", j.label, n, total), frac)
+			report(hlsProgressText(j.label, n, total, meter.Total(), meter.Total()-startBytes, meter.Rate()), frac)
 		})
 		if f != nil {
 			if cerr := f.Close(); err == nil {
@@ -508,6 +526,23 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 	}
 	done(files)
 	return nil
+}
+
+// hlsProgressText : « Vidéo · segment 12/240 · 120 Mo · 5.1 Mo/s · reste ~3 min ».
+// jobBytes : octets reçus pour cette piste ; sert à estimer le temps restant à
+// partir de la taille moyenne des segments déjà reçus.
+func hlsProgressText(label string, seg, total int, allBytes, jobBytes int64, rate float64) string {
+	s := fmt.Sprintf("%s · segment %d/%d · %s", label, seg, total, humanSize(allBytes))
+	if r := formatRate(rate); r != "" {
+		s += " · " + r
+		if seg > 0 && total > seg {
+			remaining := float64(jobBytes) / float64(seg) * float64(total-seg)
+			if eta := formatETA(remaining / rate); eta != "" {
+				s += " · reste " + eta
+			}
+		}
+	}
+	return s
 }
 
 // uniquePath retourne p, ou « nom_2.ext », « nom_3.ext »… si p existe déjà.

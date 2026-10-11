@@ -727,14 +727,10 @@ func (b *browser) download(it pcloud.Item) {
 		}
 		b.transfer("Téléchargement", func(ctx context.Context, report func(string, float64)) error {
 			defer wc.Close()
+			meter := newSpeedMeter()
 			return b.c.Download(ctx, it.FileID, wc, func(done, total int64) {
-				text := it.Name
-				if total > 0 {
-					text += " · " + humanSize(done) + " / " + humanSize(total)
-				} else {
-					text += " · " + humanSize(done)
-				}
-				report(text, fraction(done, total))
+				meter.Set(done)
+				report(progressText(it.Name, done, total, meter.Rate()), fraction(done, total))
 			})
 		})
 	}, b.w)
@@ -784,6 +780,8 @@ func (b *browser) uploadPaths(paths []string) {
 			total += countFiles(p)
 		}
 		n := 0
+		meter := newSpeedMeter()
+		var sent int64 // octets des fichiers déjà envoyés
 		var up func(parent uint64, p string) error
 		up = func(parent uint64, p string) error {
 			if err := ctx.Err(); err != nil {
@@ -821,9 +819,12 @@ func (b *browser) uploadPaths(paths []string) {
 			defer f.Close()
 			n++
 			prefix := fmt.Sprintf("%d/%d · %s", n, total, fi.Name())
-			return b.c.Upload(ctx, parent, fi.Name(), f, fi.Size(), fi.ModTime(), func(done, size int64) {
-				report(prefix+" · "+humanSize(done)+" / "+humanSize(size), fraction(done, size))
+			err = b.c.Upload(ctx, parent, fi.Name(), f, fi.Size(), fi.ModTime(), func(done, size int64) {
+				meter.Set(sent + done)
+				report(progressText(prefix, done, size, meter.Rate()), fraction(done, size))
 			})
+			sent += fi.Size()
+			return err
 		}
 		for _, p := range paths {
 			if err := up(dest, p); err != nil {

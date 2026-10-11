@@ -371,3 +371,27 @@ func TestDecryptWrongKeyIsDetectedOrGarbage(t *testing.T) {
 		t.Fatal("longueur invalide : erreur attendue")
 	}
 }
+
+func TestDownloadReportsBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("z"), 5000))
+	}))
+	defer srv.Close()
+	m := &Media{EndList: true, Segments: []Segment{{URI: srv.URL + "/a"}, {URI: srv.URL + "/b"}, {URI: srv.URL + "/c"}}}
+	var got int64
+	d := NewDownloader()
+	d.Parallel = 3
+	err := d.Download(context.Background(), m, &bytes.Buffer{}, Options{OnBytes: func(n int) { atomic.AddInt64(&got, int64(n)) }}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 15000 {
+		t.Fatalf("octets comptés = %d, attendus 15000", got)
+	}
+}
+
+func TestDefaultParallel(t *testing.T) {
+	if NewDownloader().Parallel != 6 {
+		t.Fatalf("parallélisme par défaut = %d, attendu 6", NewDownloader().Parallel)
+	}
+}
