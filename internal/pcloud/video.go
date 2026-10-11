@@ -107,38 +107,72 @@ func (e *UnexpectedResponseError) Error() string {
 	return fmt.Sprintf("réponse inattendue de %s : %s", e.Method, e.Raw)
 }
 
-// MediaTranscodeLink demande le lien de streaming transcodé d'une vidéo, avec
-// la méthode (non documentée) qu'utilise le site web de pCloud. Le lien est
-// souvent une playlist HLS (master.m3u8) ; l'appelant en décide d'après l'URL.
-func (c *Client) MediaTranscodeLink(ctx context.Context, fileID uint64) (string, error) {
+// TranscodeVariant est une entrée de la réponse de getmediatranscodelink.
+type TranscodeVariant struct {
+	Type       string   `json:"transcodetype"` // "hls", "original"…
+	IsOriginal bool     `json:"isoriginal"`
+	Path       string   `json:"path"`
+	Hosts      []string `json:"hosts"`
+	DwlTag     string   `json:"dwltag"`
+}
+
+// IsHLS indique une playlist HLS (master.m3u8).
+func (v TranscodeVariant) IsHLS() bool {
+	return strings.EqualFold(v.Type, "hls") || strings.Contains(strings.ToLower(v.Path), ".m3u8")
+}
+
+// MediaTranscodeLink demande le lien de streaming d'une vidéo avec la méthode
+// (non documentée) qu'utilise le site web de pCloud. Elle préfère la playlist
+// HLS (master.m3u8) ; à défaut, une version transcodée, puis l'original.
+// isHLS indique que l'URL est une playlist à lire avec le paquet hls.
+func (c *Client) MediaTranscodeLink(ctx context.Context, fileID uint64) (link string, isHLS bool, err error) {
 	var raw json.RawMessage
-	err := c.call(ctx, "getmediatranscodelink", url.Values{
+	err = c.call(ctx, "getmediatranscodelink", url.Values{
 		"fileid":         {fmt.Sprint(fileID)},
 		"transcodeahead": {"true"},
 		"mediatype":      {"video"},
 	}, &raw)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var r struct {
-		Hosts []string `json:"hosts"`
-		Path  string   `json:"path"`
-		URL   string   `json:"url"`
-		Link  string   `json:"link"`
+		Variants []TranscodeVariant `json:"variants"`
+		Hosts    []string           `json:"hosts"`
+		Path     string             `json:"path"`
 	}
 	if err := json.Unmarshal(raw, &r); err == nil {
-		switch {
-		case r.URL != "":
-			return r.URL, nil
-		case r.Link != "":
-			return r.Link, nil
-		case len(r.Hosts) > 0 && r.Path != "":
-			return c.contentURL(r.Hosts, r.Path)
+		// Ordre de préférence : HLS, autre version transcodée, original.
+		rank := func(v TranscodeVariant) int {
+			switch {
+			case v.IsHLS():
+				return 0
+			case !v.IsOriginal:
+				return 1
+			}
+			return 2
+		}
+		best := -1
+		for i, v := range r.Variants {
+			if len(v.Hosts) == 0 || v.Path == "" {
+				continue
+			}
+			if best < 0 || rank(v) < rank(r.Variants[best]) {
+				best = i
+			}
+		}
+		if best >= 0 {
+			v := r.Variants[best]
+			u, err := c.contentURL(v.Hosts, v.Path)
+			return u, v.IsHLS(), err
+		}
+		if len(r.Hosts) > 0 && r.Path != "" {
+			u, err := c.contentURL(r.Hosts, r.Path)
+			return u, strings.Contains(strings.ToLower(r.Path), ".m3u8"), err
 		}
 	}
 	s := string(raw)
 	if len(s) > 1200 {
 		s = s[:1200] + "…"
 	}
-	return "", &UnexpectedResponseError{Method: "getmediatranscodelink", Raw: s}
+	return "", false, &UnexpectedResponseError{Method: "getmediatranscodelink", Raw: s}
 }

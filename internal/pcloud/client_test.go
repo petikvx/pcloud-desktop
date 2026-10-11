@@ -325,19 +325,36 @@ func TestVideoLinkSendsFixedBitrateAndOptions(t *testing.T) {
 }
 
 func TestMediaTranscodeLinkShapes(t *testing.T) {
+	// Forme réelle observée : variante hls (master.m3u8) + original.
+	real := map[string]any{"result": 0, "variants": []map[string]any{
+		{"dwltag": "K", "transcodetype": "hls", "isoriginal": false, "path": "/VcW/master.m3u8",
+			"hosts": []string{"et3-c.pcloud.com"}, "ips": []string{"45.131.245.143"}},
+		{"dwltag": "K", "transcodetype": "original", "isoriginal": true, "path": "/VcB/Film.mkv",
+			"hosts": []string{"edef3.pcloud.com", "evc944.pcloud.com"}},
+	}}
+	// Même chose, mais l'original est listé en premier.
+	reversed := map[string]any{"result": 0, "variants": []map[string]any{
+		real["variants"].([]map[string]any)[1], real["variants"].([]map[string]any)[0],
+	}}
+	onlyOriginal := map[string]any{"result": 0, "variants": []map[string]any{
+		{"transcodetype": "original", "isoriginal": true, "path": "/VcB/Film.mkv", "hosts": []string{"edef3.pcloud.com"}},
+	}}
 	cases := []struct {
-		name string
-		resp map[string]any
-		want string // suffixe de l'URL attendue ; vide : erreur attendue
+		name    string
+		resp    map[string]any
+		want    string // suffixe d'URL attendu ; vide : erreur attendue
+		wantHLS bool
 	}{
-		{"hosts+path", map[string]any{"result": 0, "hosts": []string{"s1.pcloud.com"}, "path": "/x/master.m3u8"}, "s1.pcloud.com/x/master.m3u8"},
-		{"url", map[string]any{"result": 0, "url": "https://cdn.example/master.m3u8"}, "https://cdn.example/master.m3u8"},
-		{"inconnu", map[string]any{"result": 0, "streams": []string{"a"}}, ""},
+		{"réel", real, "et3-c.pcloud.com/VcW/master.m3u8", true},
+		{"original en premier", reversed, "et3-c.pcloud.com/VcW/master.m3u8", true},
+		{"original seul", onlyOriginal, "edef3.pcloud.com/VcB/Film.mkv", false},
+		{"hosts+path", map[string]any{"result": 0, "hosts": []string{"s1.pcloud.com"}, "path": "/x/master.m3u8"}, "s1.pcloud.com/x/master.m3u8", true},
+		{"inconnu", map[string]any{"result": 0, "streams": []string{"a"}}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f, c := newFake(t, map[string]any{"/getmediatranscodelink": tc.resp})
-			u, err := c.MediaTranscodeLink(context.Background(), 98339677951)
+			u, isHLS, err := c.MediaTranscodeLink(context.Background(), 98339677951)
 			if f.form["fileid"][0] != "98339677951" || f.form["transcodeahead"][0] != "true" || f.form["mediatype"][0] != "video" {
 				t.Fatalf("form = %v", f.form)
 			}
@@ -348,8 +365,8 @@ func TestMediaTranscodeLinkShapes(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.HasSuffix(u, tc.want) {
-				t.Fatalf("u = %q, err = %v", u, err)
+			if err != nil || !strings.HasSuffix(u, tc.want) || isHLS != tc.wantHLS {
+				t.Fatalf("u = %q, hls = %v, err = %v", u, isHLS, err)
 			}
 		})
 	}

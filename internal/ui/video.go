@@ -80,7 +80,7 @@ func (b *browser) downloadStream(it pcloud.Item) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		link, webErr := b.c.MediaTranscodeLink(ctx, it.FileID)
+		link, isHLS, webErr := b.c.MediaTranscodeLink(ctx, it.FileID)
 		var variants []pcloud.VideoVariant
 		var apiErr error
 		if webErr != nil && !pcloud.IsAuthError(webErr) {
@@ -89,7 +89,7 @@ func (b *browser) downloadStream(it pcloud.Item) {
 		fyne.Do(func() {
 			b.status.SetText(summary(b.view))
 			switch {
-			case webErr == nil && looksLikeHLS(link):
+			case webErr == nil && (isHLS || looksLikeHLS(link)):
 				b.openHLSToolWith(link)
 			case webErr == nil:
 				b.saveStream(it, streamFileName(it.Name, 0), func(context.Context) (string, error) { return link, nil })
