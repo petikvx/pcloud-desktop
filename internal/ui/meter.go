@@ -20,6 +20,7 @@ type speedMeter struct {
 	mu      sync.Mutex
 	now     func() time.Time // remplaçable dans les tests
 	total   int64
+	started bool // un cumul a déjà été fixé par Set
 	samples []meterSample
 	rate    float64
 }
@@ -38,8 +39,14 @@ func (m *speedMeter) Add(n int64) {
 }
 
 // Set fixe le total cumulé (quand la source donne un cumul, pas un incrément).
+// Le premier cumul sert de point de départ : un transfert repris à l'octet N ne
+// compte pas ces N octets dans le débit.
 func (m *speedMeter) Set(total int64) {
 	m.mu.Lock()
+	if !m.started {
+		m.started = true
+		m.samples[0].total = total
+	}
 	m.total = total
 	m.mu.Unlock()
 }
@@ -102,7 +109,7 @@ func progressText(label string, done, total int64, rate float64) string {
 		s += " · " + r
 		if total > done {
 			if eta := formatETA(float64(total-done) / rate); eta != "" {
-				s += " · reste " + eta
+				s += trf(" · reste %s", eta)
 			}
 		}
 	}

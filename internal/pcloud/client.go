@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // defaultBase est le datacenter européen, seul utilisé par ce client.
@@ -48,6 +50,10 @@ type Client struct {
 	auth     string
 	http     *http.Client // appels d'API, avec délai
 	transfer *http.Client // téléchargements et envois : durée bornée par le contexte
+
+	retries    int           // tentatives après une coupure réseau
+	retryDelay time.Duration // attente avant la première nouvelle tentative
+	chunkSize  int64         // taille d'un morceau d'envoi ; au-delà, envoi reprenable
 }
 
 func New() *Client {
@@ -55,6 +61,10 @@ func New() *Client {
 		base:     defaultBase,
 		http:     &http.Client{Timeout: 30 * time.Second},
 		transfer: &http.Client{},
+
+		retries:    defaultRetries,
+		retryDelay: defaultRetryDelay,
+		chunkSize:  defaultChunkSize,
 	}
 }
 
@@ -136,7 +146,7 @@ func (c *Client) call(ctx context.Context, method string, params url.Values, out
 func decodeAPI(r io.Reader, out any) error {
 	var raw json.RawMessage
 	if err := json.NewDecoder(r).Decode(&raw); err != nil {
-		return fmt.Errorf("réponse illisible : %w", err)
+		return fmt.Errorf(i18n.T("réponse illisible : %w"), err)
 	}
 	var head struct {
 		Result int    `json:"result"`

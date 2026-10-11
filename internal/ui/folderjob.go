@@ -45,7 +45,7 @@ func scanFolder(ctx context.Context, l lister, folderID uint64) ([]entry, error)
 	var walk func(id uint64, rel string, depth int) error
 	walk = func(id uint64, rel string, depth int) error {
 		if depth > maxScanDepth {
-			return fmt.Errorf("arborescence trop profonde (plus de %d niveaux)", maxScanDepth)
+			return fmt.Errorf(tr("arborescence trop profonde (plus de %d niveaux)"), maxScanDepth)
 		}
 		items, err := l.ListFolder(ctx, id)
 		if err != nil {
@@ -120,24 +120,13 @@ func (j *folderJob) plain(ctx context.Context, dir string, it pcloud.Item, repor
 	if fi, err := os.Stat(dest); err == nil && fi.Size() == it.Size {
 		return queue.ErrSkipped
 	}
-	part := dest + ".part"
-	f, err := os.Create(part)
-	if err != nil {
-		return err
-	}
+	// Le fichier partiel (dest.part) est conservé après un échec ou une
+	// annulation : relancer le lot reprend à l'octet où il s'est arrêté.
 	meter := newSpeedMeter()
-	err = j.c.Download(ctx, it.FileID, f, func(done, total int64) {
+	return j.c.DownloadFileTo(ctx, it.FileID, dest, resumeTag(it), func(done, total int64) {
 		meter.Set(done)
 		report(progressText(it.Name, done, total, meter.Rate()), fraction(done, total))
 	})
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		_ = os.Remove(part)
-		return err
-	}
-	return finalize(part, dest)
 }
 
 func (j *folderJob) video(ctx context.Context, dir string, it pcloud.Item, report func(string, float64)) error {
@@ -148,10 +137,10 @@ func (j *folderJob) video(ctx context.Context, dir string, it pcloud.Item, repor
 		}
 	}
 
-	report(it.Name+" · recherche du flux…", 0)
+	report(it.Name+tr(" · recherche du flux…"), 0)
 	link, isHLS, err := j.c.MediaTranscodeLink(ctx, it.FileID)
 	if err != nil {
-		return fmt.Errorf("lien de streaming : %w", err)
+		return fmt.Errorf(tr("lien de streaming : %w"), err)
 	}
 	if !isHLS {
 		// Pas de playlist : on prend le fichier tel quel.
@@ -159,7 +148,7 @@ func (j *folderJob) video(ctx context.Context, dir string, it pcloud.Item, repor
 	}
 	master, media, err := j.dl.FetchPlaylist(ctx, link)
 	if err != nil {
-		return fmt.Errorf("playlist : %w", err)
+		return fmt.Errorf(tr("playlist : %w"), err)
 	}
 
 	var video *hls.Media
@@ -171,10 +160,10 @@ func (j *folderJob) video(ctx context.Context, dir string, it pcloud.Item, repor
 		}
 		nested, md, err := j.dl.FetchPlaylist(ctx, sel.Variant.URI)
 		if err != nil {
-			return fmt.Errorf("playlist vidéo : %w", err)
+			return fmt.Errorf(tr("playlist vidéo : %w"), err)
 		}
 		if nested != nil || md == nil {
-			return errors.New("playlist vidéo inattendue (master au lieu d'une playlist média)")
+			return errors.New(tr("playlist vidéo inattendue (master au lieu d'une playlist média)"))
 		}
 		video, audio, subs = md, sel.Audio, sel.Subs
 	} else {

@@ -18,7 +18,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/zalando/go-keyring"
 
+	"pcloud-desktop/internal/i18n"
 	"pcloud-desktop/internal/pcloud"
+	"pcloud-desktop/internal/uploadstate"
 )
 
 // pathEntry mémorise un dossier visité pour pouvoir remonter.
@@ -47,6 +49,7 @@ type browser struct {
 	selected int
 
 	thumbs         *thumbCache
+	uploads        *uploadstate.Store // envois reprenables
 	refreshPending bool
 
 	list       *widget.List
@@ -65,14 +68,29 @@ type browser struct {
 }
 
 func showBrowser(a fyne.App, w fyne.Window, c *pcloud.Client) {
-	b := &browser{
+	b := newBrowser(a, w, c)
+	b.build()
+	b.load(true)
+	b.loadQuota()
+}
+
+func newBrowser(a fyne.App, w fyne.Window, c *pcloud.Client) *browser {
+	return &browser{
 		a: a, w: w, c: c,
 		stack:    []pathEntry{{0, "pCloud"}},
 		cache:    map[uint64][]pcloud.Item{},
 		sortAsc:  true,
 		selected: -1,
 		thumbs:   newThumbCache(),
+		uploads:  uploadstate.Open(uploadstate.DefaultPath()),
 	}
+}
+
+// rebuild reconstruit l'écran après un changement de langue, en gardant le
+// dossier courant.
+func (b *browser) rebuild() {
+	b.release()
+	b.selected = -1
 	b.build()
 	b.load(true)
 	b.loadQuota()
@@ -84,7 +102,7 @@ func (b *browser) current() pathEntry { return b.stack[len(b.stack)-1] }
 
 func (b *browser) build() {
 	b.search = widget.NewEntry()
-	b.search.SetPlaceHolder("Rechercher dans ce dossier…  (Ctrl+F)")
+	b.search.SetPlaceHolder(tr("Rechercher dans ce dossier…  (Ctrl+F)"))
 	b.search.OnChanged = func(s string) {
 		b.filter = s
 		b.rebuildView()
@@ -110,23 +128,29 @@ func (b *browser) build() {
 	b.backBtn = widget.NewButtonWithIcon("", theme.NavigateBackIcon(), b.back)
 	b.upBtn = widget.NewButtonWithIcon("", theme.MoveUpIcon(), b.up)
 	refresh := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), b.refresh)
-	newFolder := widget.NewButtonWithIcon("Nouveau dossier", theme.FolderNewIcon(), b.newFolder)
+	newFolder := widget.NewButtonWithIcon(tr("Nouveau dossier"), theme.FolderNewIcon(), b.newFolder)
 	var upload *widget.Button
-	upload = widget.NewButtonWithIcon("Envoyer", theme.UploadIcon(), func() {
+	upload = widget.NewButtonWithIcon(tr("Envoyer"), theme.UploadIcon(), func() {
 		menu := fyne.NewMenu("",
-			fyne.NewMenuItem("Un fichier…", b.pickFileToUpload),
-			fyne.NewMenuItem("Un dossier…", b.pickFolderToUpload),
+			fyne.NewMenuItem(tr("Un fichier…"), b.pickFileToUpload),
+			fyne.NewMenuItem(tr("Un dossier…"), b.pickFolderToUpload),
 		)
 		pos := b.a.Driver().AbsolutePositionForObject(upload)
 		widget.ShowPopUpMenuAtPosition(menu, b.w.Canvas(), pos.Add(fyne.NewPos(0, upload.Size().Height)))
 	})
-	hlsTool := widget.NewButtonWithIcon("Flux HLS", theme.MediaVideoIcon(), b.openHLSTool)
-	logout := widget.NewButtonWithIcon("Déconnexion", theme.LogoutIcon(), b.logout)
+	hlsTool := widget.NewButtonWithIcon(tr("Flux HLS"), theme.MediaVideoIcon(), b.openHLSTool)
+	logout := widget.NewButtonWithIcon(tr("Déconnexion"), theme.LogoutIcon(), b.logout)
+	var langBtn *widget.Button
+	langBtn = widget.NewButtonWithIcon(strings.ToUpper(i18n.Current()), theme.ComputerIcon(), func() {
+		menu := fyne.NewMenu("", languageMenu(b.a, b.rebuild)...)
+		pos := b.a.Driver().AbsolutePositionForObject(langBtn)
+		widget.ShowPopUpMenuAtPosition(menu, b.w.Canvas(), pos.Add(fyne.NewPos(0, langBtn.Size().Height)))
+	})
 
 	b.crumbs = container.NewHBox()
 	toolbar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backBtn, b.upBtn, refresh),
-		container.NewHBox(newFolder, upload, hlsTool, logout),
+		container.NewHBox(newFolder, upload, hlsTool, langBtn, logout),
 		container.NewHScroll(b.crumbs),
 	)
 
@@ -152,7 +176,7 @@ func (b *browser) build() {
 	b.emptyLabel = widget.NewLabel("")
 	b.emptyLabel.Alignment = fyne.TextAlignCenter
 	b.emptyLabel.Wrapping = fyne.TextWrapWord
-	b.retryBtn = widget.NewButtonWithIcon("Réessayer", theme.ViewRefreshIcon(), b.refresh)
+	b.retryBtn = widget.NewButtonWithIcon(tr("Réessayer"), theme.ViewRefreshIcon(), b.refresh)
 	b.retryBtn.Hide()
 	b.emptyBox = container.NewCenter(container.NewVBox(b.emptyLabel, b.retryBtn))
 	b.emptyBox.Hide()
@@ -225,7 +249,7 @@ func (b *browser) logout() {
 func (b *browser) expire() {
 	_ = keyring.Delete(keyringService, keyringUser)
 	b.release()
-	showLogin(b.a, b.w, pcloud.New(), "Session expirée : reconnectez-vous.")
+	showLogin(b.a, b.w, pcloud.New(), tr("Session expirée : reconnectez-vous."))
 }
 
 // fail affiche une erreur, ou renvoie à la connexion si le jeton est refusé.
@@ -323,11 +347,11 @@ func (b *browser) load(useCache bool) {
 
 	if cached, ok := b.cache[cur.id]; ok && useCache {
 		b.setItems(cached)
-		b.status.SetText(summary(b.view) + " · actualisation…")
+		b.status.SetText(summary(b.view) + tr(" · actualisation…"))
 	} else {
 		b.setItems(nil)
 		b.emptyBox.Hide()
-		b.status.SetText("Chargement…")
+		b.status.SetText(tr("Chargement…"))
 	}
 
 	go func() {
@@ -358,7 +382,7 @@ func (b *browser) load(useCache bool) {
 func (b *browser) showLoadError(err error) {
 	b.setItems(nil)
 	b.status.SetText("")
-	b.emptyLabel.SetText("Impossible de charger ce dossier.\n" + err.Error())
+	b.emptyLabel.SetText(trf("Impossible de charger ce dossier.\n%s", err))
 	b.retryBtn.Show()
 	b.emptyBox.Show()
 }
@@ -381,11 +405,11 @@ func (b *browser) rebuildView() {
 	case len(v) > 0:
 		b.emptyBox.Hide()
 	case strings.TrimSpace(b.filter) != "":
-		b.emptyLabel.SetText("Aucun résultat pour « " + strings.TrimSpace(b.filter) + " ».")
+		b.emptyLabel.SetText(trf("Aucun résultat pour « %s ».", strings.TrimSpace(b.filter)))
 		b.retryBtn.Hide()
 		b.emptyBox.Show()
 	case b.items != nil:
-		b.emptyLabel.SetText("Dossier vide.\nGlissez des fichiers ici pour les envoyer.")
+		b.emptyLabel.SetText(tr("Dossier vide.\nGlissez des fichiers ici pour les envoyer."))
 		b.retryBtn.Hide()
 		b.emptyBox.Show()
 	}
@@ -405,7 +429,7 @@ func (b *browser) sortBy(k sortKey) {
 }
 
 func (b *browser) updateSortButtons() {
-	labels := map[sortKey]string{sortName: "Nom", sortSize: "Taille", sortDate: "Modifié"}
+	labels := map[sortKey]string{sortName: tr("Nom"), sortSize: tr("Taille"), sortDate: tr("Modifié")}
 	for k, btn := range b.sortBtns {
 		text := labels[k]
 		if k == b.sortKey {
@@ -472,22 +496,22 @@ func (b *browser) showMenu(idx int, pos fyne.Position) {
 	var items []*fyne.MenuItem
 	if it.IsFolder {
 		items = append(items,
-			fyne.NewMenuItem("Ouvrir", func() { b.open(idx) }),
-			fyne.NewMenuItem("Télécharger le dossier (streaming)…", func() { b.downloadFolder(it) }),
+			fyne.NewMenuItem(tr("Ouvrir"), func() { b.open(idx) }),
+			fyne.NewMenuItem(tr("Télécharger le dossier (streaming)…"), func() { b.downloadFolder(it) }),
 		)
 	} else {
-		items = append(items, fyne.NewMenuItem("Télécharger…", func() { b.download(it) }))
+		items = append(items, fyne.NewMenuItem(tr("Télécharger…"), func() { b.download(it) }))
 		if it.Category == pcloud.CategoryVideo {
-			items = append(items, fyne.NewMenuItem("Télécharger une version streaming…", func() { b.downloadStream(it) }))
+			items = append(items, fyne.NewMenuItem(tr("Télécharger une version streaming…"), func() { b.downloadStream(it) }))
 		}
 	}
 	items = append(items,
-		fyne.NewMenuItem("Renommer…", func() { b.rename(it) }),
-		fyne.NewMenuItem("Déplacer…", func() { b.move(it) }),
+		fyne.NewMenuItem(tr("Renommer…"), func() { b.rename(it) }),
+		fyne.NewMenuItem(tr("Déplacer…"), func() { b.move(it) }),
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Créer et copier un lien public", func() { b.publicLink(it) }),
+		fyne.NewMenuItem(tr("Créer et copier un lien public"), func() { b.publicLink(it) }),
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Supprimer…", func() { b.confirmDelete(it) }),
+		fyne.NewMenuItem(tr("Supprimer…"), func() { b.confirmDelete(it) }),
 	)
 	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), b.w.Canvas(), pos)
 }
@@ -514,15 +538,15 @@ func (b *browser) mutate(op func(ctx context.Context) error) {
 func (b *browser) askName(title, confirm, initial string, onOK func(name string)) {
 	e := widget.NewEntry()
 	e.SetText(initial)
-	d := dialog.NewForm(title, confirm, "Annuler",
-		[]*widget.FormItem{widget.NewFormItem("Nom", e)},
+	d := dialog.NewForm(title, confirm, tr("Annuler"),
+		[]*widget.FormItem{widget.NewFormItem(tr("Nom"), e)},
 		func(ok bool) {
 			if !ok {
 				return
 			}
 			name := strings.TrimSpace(e.Text)
 			if !validName(name) {
-				dialog.ShowError(errors.New("nom invalide : il ne doit pas être vide ni contenir « / » ou « \\ »"), b.w)
+				dialog.ShowError(errors.New(tr("nom invalide : il ne doit pas être vide ni contenir « / » ou « \\ »")), b.w)
 				return
 			}
 			onOK(name)
@@ -534,13 +558,13 @@ func (b *browser) askName(title, confirm, initial string, onOK func(name string)
 
 func (b *browser) newFolder() {
 	parent := b.current().id
-	b.askName("Nouveau dossier", "Créer", "", func(name string) {
+	b.askName(tr("Nouveau dossier"), tr("Créer"), "", func(name string) {
 		b.mutate(func(ctx context.Context) error { return b.c.CreateFolder(ctx, parent, name) })
 	})
 }
 
 func (b *browser) rename(it pcloud.Item) {
-	b.askName("Renommer", "Renommer", it.Name, func(name string) {
+	b.askName(tr("Renommer"), tr("Renommer"), it.Name, func(name string) {
 		if name == it.Name {
 			return
 		}
@@ -549,11 +573,11 @@ func (b *browser) rename(it pcloud.Item) {
 }
 
 func (b *browser) confirmDelete(it pcloud.Item) {
-	msg := fmt.Sprintf("Supprimer « %s » ?", it.Name)
+	msg := trf("Supprimer « %s » ?", it.Name)
 	if it.IsFolder {
-		msg = fmt.Sprintf("Supprimer le dossier « %s » et tout son contenu ?", it.Name)
+		msg = trf("Supprimer le dossier « %s » et tout son contenu ?", it.Name)
 	}
-	dialog.ShowConfirm("Supprimer", msg, func(ok bool) {
+	dialog.ShowConfirm(tr("Supprimer"), msg, func(ok bool) {
 		if ok {
 			b.mutate(func(ctx context.Context) error { return b.c.Delete(ctx, it) })
 		}
@@ -561,7 +585,7 @@ func (b *browser) confirmDelete(it pcloud.Item) {
 }
 
 func (b *browser) move(it pcloud.Item) {
-	b.pickFolder("Déplacer « "+it.Name+" » vers…", it, func(dest uint64) {
+	b.pickFolder(trf("Déplacer « %s » vers…", it.Name), it, func(dest uint64) {
 		b.mutate(func(ctx context.Context) error { return b.c.Move(ctx, it, dest) })
 	})
 }
@@ -577,7 +601,7 @@ func (b *browser) publicLink(it pcloud.Item) {
 				return
 			}
 			b.a.Clipboard().SetContent(link)
-			dialog.ShowInformation("Lien copié", link, b.w)
+			dialog.ShowInformation(tr("Lien copié"), link, b.w)
 		})
 	}()
 }
@@ -630,7 +654,7 @@ func (b *browser) pickFolder(title string, skip pcloud.Item, onPick func(folderI
 			l := o.(*fyne.Container).Objects[1].(*widget.Label)
 			switch {
 			case i == 0 && len(stack) > 1:
-				l.SetText(".. (dossier parent)")
+				l.SetText(tr(".. (dossier parent)"))
 			case i == 0:
 				l.SetText("")
 			case i-1 < len(folders):
@@ -653,7 +677,7 @@ func (b *browser) pickFolder(title string, skip pcloud.Item, onPick func(folderI
 
 	min := container.NewGridWrap(fyne.NewSize(460, 320), list)
 	content := container.NewBorder(path, nil, nil, nil, min)
-	d := dialog.NewCustomConfirm(title, "Choisir ce dossier", "Annuler", content, func(ok bool) {
+	d := dialog.NewCustomConfirm(title, tr("Choisir ce dossier"), tr("Annuler"), content, func(ok bool) {
 		if ok {
 			onPick(stack[len(stack)-1].id)
 		}
@@ -671,7 +695,7 @@ func (b *browser) transfer(title string, work func(ctx context.Context, report f
 	label := widget.NewLabel("")
 	label.Truncation = fyne.TextTruncateEllipsis
 	bar := widget.NewProgressBar()
-	d := dialog.NewCustom(title, "Annuler",
+	d := dialog.NewCustom(title, tr("Annuler"),
 		container.NewGridWrap(fyne.NewSize(440, label.MinSize().Height+bar.MinSize().Height+theme.Padding()),
 			container.NewVBox(label, bar)), b.w)
 	d.SetOnClosed(cancel)
@@ -730,13 +754,9 @@ func (b *browser) download(it pcloud.Item) {
 		if wc == nil {
 			return
 		}
-		b.transfer("Téléchargement", func(ctx context.Context, report func(string, float64)) error {
-			defer wc.Close()
-			meter := newSpeedMeter()
-			return b.c.Download(ctx, it.FileID, wc, func(done, total int64) {
-				meter.Set(done)
-				report(progressText(it.Name, done, total, meter.Rate()), fraction(done, total))
-			})
+		b.transfer(tr("Téléchargement"), func(ctx context.Context, report func(string, float64)) error {
+			link := func(ctx context.Context) (string, error) { return b.c.FileURL(ctx, it.FileID) }
+			return b.saveInto(ctx, wc, link, resumeTag(it), it.Name, report)
 		})
 	}, b.w)
 	d.SetFileName(it.Name)
@@ -779,7 +799,7 @@ func (b *browser) uploadPaths(paths []string) {
 		return
 	}
 	dest := b.current().id
-	b.transfer("Envoi", func(ctx context.Context, report func(string, float64)) error {
+	b.transfer(tr("Envoi"), func(ctx context.Context, report func(string, float64)) error {
 		total := 0
 		for _, p := range paths {
 			total += countFiles(p)
@@ -824,7 +844,14 @@ func (b *browser) uploadPaths(paths []string) {
 			defer f.Close()
 			n++
 			prefix := fmt.Sprintf("%d/%d · %s", n, total, fi.Name())
-			err = b.c.Upload(ctx, parent, fi.Name(), f, fi.Size(), fi.ModTime(), func(done, size int64) {
+			// Les gros fichiers sont envoyés par morceaux ; l'envoi interrompu
+			// est mémorisé et repris au prochain essai (même fichier, même dossier).
+			abs, aerr := filepath.Abs(p)
+			if aerr != nil {
+				abs = p
+			}
+			resume := b.uploads.For(uploadstate.Key(abs, fi.Size(), fi.ModTime(), parent, fi.Name()))
+			err = b.c.UploadFile(ctx, parent, fi.Name(), f, fi.Size(), fi.ModTime(), resume, func(done, size int64) {
 				meter.Set(sent + done)
 				report(progressText(prefix, done, size, meter.Rate()), fraction(done, size))
 			})

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // flexString accepte une chaîne ou un nombre JSON (pCloud est incohérent sur
@@ -104,7 +106,7 @@ type UnexpectedResponseError struct {
 }
 
 func (e *UnexpectedResponseError) Error() string {
-	return fmt.Sprintf("réponse inattendue de %s : %s", e.Method, e.Raw)
+	return i18n.Tf("réponse inattendue de %s : %s", e.Method, e.Raw)
 }
 
 // TranscodeVariant est une entrée de la réponse de getmediatranscodelink.

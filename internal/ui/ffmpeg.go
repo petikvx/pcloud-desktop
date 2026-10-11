@@ -97,7 +97,7 @@ func runHLSMerged(ctx context.Context, dl *hls.Downloader, ffmpeg, outPath strin
 		return err
 	}
 
-	report("Assemblage en MP4 (ffmpeg)…", 0.96)
+	report(tr("Assemblage en MP4 (ffmpeg)…"), 0.96)
 	cmd := exec.CommandContext(ctx, ffmpeg, ffmpegArgs(files, audio, subs, outPath)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
@@ -108,7 +108,7 @@ func runHLSMerged(ctx context.Context, dl *hls.Downloader, ffmpeg, outPath strin
 		if len(msg) > 600 {
 			msg = msg[len(msg)-600:]
 		}
-		return fmt.Errorf("ffmpeg a échoué : %v\n%s\n\nFichiers conservés dans %s", err, msg, tmp)
+		return fmt.Errorf(tr("ffmpeg a échoué : %v\n%s\n\nFichiers conservés dans %s"), err, msg, tmp)
 	}
 	_ = os.RemoveAll(tmp)
 	done([]string{outPath})

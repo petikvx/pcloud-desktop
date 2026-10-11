@@ -9,9 +9,11 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/zalando/go-keyring"
 
+	"pcloud-desktop/internal/i18n"
 	"pcloud-desktop/internal/pcloud"
 )
 
@@ -19,7 +21,7 @@ import (
 // un jeton valide est stocké dans le trousseau système.
 func Start(a fyne.App, w fyne.Window, c *pcloud.Client) {
 	if value, ok := loadSession(); ok {
-		w.SetContent(container.NewCenter(widget.NewLabel("Reconnexion…")))
+		w.SetContent(container.NewCenter(widget.NewLabel(tr("Reconnexion…"))))
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -59,11 +61,11 @@ func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
 	bar.Hide()
 
 	user := widget.NewEntry()
-	user.SetPlaceHolder("Adresse e-mail")
+	user.SetPlaceHolder(tr("Adresse e-mail"))
 	pass := widget.NewPasswordEntry()
-	pass.SetPlaceHolder("Mot de passe")
+	pass.SetPlaceHolder(tr("Mot de passe"))
 	key := widget.NewPasswordEntry()
-	key.SetPlaceHolder("Clé API (jeton auth)")
+	key.SetPlaceHolder(tr("Clé API (jeton auth)"))
 
 	var buttons []*widget.Button
 	// run exécute une connexion hors du thread d'interface.
@@ -90,7 +92,7 @@ func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
 					b.Enable()
 				}
 				if err != nil {
-					setStatus("Échec de connexion : "+err.Error(), true)
+					setStatus(trf("Échec de connexion : %s", err), true)
 					return
 				}
 				showBrowser(a, w, c)
@@ -99,32 +101,41 @@ func showLogin(a fyne.App, w fyne.Window, c *pcloud.Client, notice string) {
 	}
 
 	loginPass := func() {
-		run(30*time.Second, "Renseignez l'e-mail et le mot de passe.", user.Text == "" || pass.Text == "",
+		run(30*time.Second, tr("Renseignez l'e-mail et le mot de passe."), user.Text == "" || pass.Text == "",
 			func(ctx context.Context) error { return c.Login(ctx, user.Text, pass.Text) })
 	}
 	loginKey := func() {
 		token := strings.TrimSpace(key.Text)
-		run(30*time.Second, "Renseignez la clé API.", token == "",
+		run(30*time.Second, tr("Renseignez la clé API."), token == "",
 			func(ctx context.Context) error { return c.UseToken(ctx, token) })
 	}
-	btnPass := widget.NewButton("Se connecter", loginPass)
-	btnKey := widget.NewButton("Se connecter avec la clé", loginKey)
+	btnPass := widget.NewButton(tr("Se connecter"), loginPass)
+	btnKey := widget.NewButton(tr("Se connecter avec la clé"), loginKey)
 	buttons = []*widget.Button{btnPass, btnKey}
 	pass.OnSubmitted = func(string) { loginPass() }
 	user.OnSubmitted = func(string) { loginPass() }
 	key.OnSubmitted = func(string) { loginKey() }
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("E-mail", container.NewVBox(user, pass, btnPass)),
-		container.NewTabItem("Clé API", container.NewVBox(key, btnKey)),
+		container.NewTabItem(tr("E-mail"), container.NewVBox(user, pass, btnPass)),
+		container.NewTabItem(tr("Clé API"), container.NewVBox(key, btnKey)),
 	)
 
 	title := canvas.NewText("pCloud", pcloudBlue)
 	title.TextSize = 36
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.Alignment = fyne.TextAlignCenter
-	subtitle := widget.NewLabelWithStyle("Client de bureau · eapi.pcloud.com · "+VersionLabel(), fyne.TextAlignCenter, fyne.TextStyle{})
+	subtitle := widget.NewLabelWithStyle(trf("Client de bureau · eapi.pcloud.com · %s", VersionLabel()), fyne.TextAlignCenter, fyne.TextStyle{})
 
-	form := container.NewVBox(title, subtitle, tabs, bar, status)
+	// Choix de la langue : le nom de chaque langue est écrit dans cette langue.
+	var langBtn *widget.Button
+	langBtn = widget.NewButtonWithIcon(strings.ToUpper(i18n.Current()), theme.ComputerIcon(), func() {
+		menu := fyne.NewMenu("", languageMenu(a, func() { showLogin(a, w, c, "") })...)
+		pos := a.Driver().AbsolutePositionForObject(langBtn)
+		widget.ShowPopUpMenuAtPosition(menu, w.Canvas(), pos.Add(fyne.NewPos(0, langBtn.Size().Height)))
+	})
+	langBtn.Importance = widget.LowImportance
+
+	form := container.NewVBox(title, subtitle, tabs, bar, status, container.NewCenter(langBtn))
 	w.SetContent(container.NewCenter(container.NewGridWrap(fyne.NewSize(400, 340), form)))
 }

@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // Variant est une qualité vidéo proposée par la playlist maître.
@@ -125,7 +127,7 @@ func Parse(r io.Reader, base *url.URL) (*Master, *Media, error) {
 		return nil, nil, err
 	}
 	if len(lines) == 0 || !strings.HasPrefix(lines[0], "#EXTM3U") {
-		return nil, nil, errors.New("ce n'est pas une playlist HLS (#EXTM3U absent)")
+		return nil, nil, errors.New(i18n.T("ce n'est pas une playlist HLS (#EXTM3U absent)"))
 	}
 	for _, l := range lines {
 		if strings.HasPrefix(l, "#EXT-X-STREAM-INF:") {
@@ -143,7 +145,7 @@ func resolve(base *url.URL, ref string) (string, error) {
 	}
 	u, err := base.Parse(ref)
 	if err != nil {
-		return "", fmt.Errorf("URI invalide %q : %w", ref, err)
+		return "", fmt.Errorf(i18n.T("URI invalide %q : %w"), ref, err)
 	}
 	return u.String(), nil
 }
@@ -193,7 +195,7 @@ func parseMaster(lines []string, base *url.URL) (*Master, error) {
 		}
 	}
 	if len(m.Variants) == 0 {
-		return nil, errors.New("playlist maître sans variante")
+		return nil, errors.New(i18n.T("playlist maître sans variante"))
 	}
 	return m, nil
 }
@@ -245,13 +247,13 @@ func parseMedia(lines []string, base *url.URL) (*Media, error) {
 				if iv := a["IV"]; iv != "" {
 					b, err := parseHex(iv)
 					if err != nil || len(b) != 16 {
-						return nil, fmt.Errorf("IV invalide : %q", iv)
+						return nil, fmt.Errorf(i18n.T("IV invalide : %q"), iv)
 					}
 					k.IV = b
 				}
 				key = k
 			default:
-				return nil, fmt.Errorf("chiffrement %s non géré (seul AES-128 l'est)", a["METHOD"])
+				return nil, fmt.Errorf(i18n.T("chiffrement %s non géré (seul AES-128 l'est)"), a["METHOD"])
 			}
 		case strings.HasPrefix(l, "#EXT-X-MAP:"):
 			a := parseAttrs(strings.TrimPrefix(l, "#EXT-X-MAP:"))
@@ -293,7 +295,7 @@ func parseMedia(lines []string, base *url.URL) (*Media, error) {
 		}
 	}
 	if len(m.Segments) == 0 {
-		return nil, errors.New("playlist média sans segment")
+		return nil, errors.New(i18n.T("playlist média sans segment"))
 	}
 	return m, nil
 }

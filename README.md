@@ -17,8 +17,46 @@ Serveur utilisé : `eapi.pcloud.com` (datacenter européen) uniquement.
   lien public ; création de dossier.
 - **Envoi** de fichiers et de dossiers (bouton « Envoyer » ou glisser-déposer).
 - **Téléchargement** d'un fichier.
+- **Reprise des transferts** : un téléchargement ou un envoi interrompu repart
+  de l'octet où il s'est arrêté (voir plus bas).
 - Progression de tous les transferts avec **débit** et **temps restant**, et
   annulation. Quota utilisé affiché dans la barre d'état.
+
+### Reprise des transferts
+
+- **Téléchargements** : le contenu arrive dans `fichier.part` (avec un petit
+  `fichier.part.json` qui identifie la version distante) et n'est renommé qu'à
+  la fin. Après une coupure réseau, l'application réessaie seule (attentes de
+  1 s, 2 s, 4 s… jusqu'à 30 s, 5 échecs consécutifs) et reprend avec un en-tête
+  `Range`. Après une annulation, une erreur ou une fermeture de l'application,
+  relancer le téléchargement vers le **même fichier** reprend aussi à l'octet
+  près ; le fichier partiel est jeté si le fichier distant a changé
+  (taille, date, `ETag`) ou si le serveur ignore `Range`.
+  Le téléchargement d'un dossier en profite : relancer le lot reprend le
+  fichier interrompu.
+- **Envois** : les fichiers de plus de 8 Mio partent par morceaux de 8 Mio
+  (`upload_create`, `upload_write`, `upload_save`). Après une coupure, le client
+  demande au serveur combien d'octets il a reçus (`upload_info`) et continue
+  à cet endroit. L'identifiant d'envoi est mémorisé dans
+  `~/.cache/pcloud-desktop/uploads.json` (3 jours) : relancer l'envoi du même
+  fichier vers le même dossier, même après un redémarrage, reprend l'envoi.
+  Les petits fichiers partent en une requête, réessayée en cas de coupure.
+- Les erreurs définitives (refus 4xx, session expirée, quota dépassé) ne sont
+  pas réessayées.
+
+### Langues
+
+L'interface existe en **français** et en **anglais**. La langue est choisie
+d'après l'environnement (`LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, `LANG` ; anglais
+si rien de reconnu), puis modifiable par le bouton **FR / EN** de la barre
+d'outils ou de l'écran de connexion ; le choix est mémorisé.
+
+Pour ajouter ou corriger une traduction : les textes sources sont en français
+dans le code (`tr("…")`, `trf("…", args)`, `i18n.T`, `i18n.Tf`, `i18n.N`) et
+la table anglaise est dans `internal/i18n/en.go`, indexée par ce texte. Un
+texte sans traduction s'affiche en français. `go test ./internal/i18n` vérifie
+que tous les textes de l'application sont traduits, qu'aucune traduction n'est
+orpheline et que les verbes de format (`%s`, `%d`…) correspondent.
 
 ### Vidéos en streaming (HLS)
 
@@ -120,13 +158,18 @@ pCloud), puis se connecter par e-mail ; ou coller le jeton `auth` dans l'onglet
 - `packaging/` : `build-deb.sh` (paquet), `release.sh` (publication), icône.
 - `internal/pcloud/` : client de l'API pCloud, sans code d'interface.
   - `client.go` : appels, erreurs, session ;
-  - `api.go` : fichiers, dossiers, transferts, miniatures ;
+  - `api.go` : fichiers, dossiers, miniatures, envoi en une requête ;
+  - `download.go` : téléchargement reprenable (`.part`, `Range`, `If-Range`) ;
+  - `upload.go` : envoi par morceaux reprenable (`upload_*`) ;
+  - `retry.go` : erreurs transitoires et attentes entre les tentatives ;
   - `video.go` : streaming (`getmediatranscodelink`, `getvideolinks`).
 - `internal/hls/` : playlists HLS, sans dépendance externe.
   - `parse.go` : playlists maître et média ;
   - `download.go` : téléchargement parallèle, AES-128, byte ranges ;
   - `select.go` : application de préférences (hauteur, langues, version audio).
 - `internal/queue/` : file d'attente séquentielle avec suivi d'état.
+- `internal/i18n/` : traductions (français, anglais) et détection de la langue.
+- `internal/uploadstate/` : mémoire sur disque des envois en cours.
 - `internal/ui/` : interface Fyne.
   - `ui.go` : connexion ; `browser.go` : navigateur et actions ;
   - `row.go`, `thumbs.go`, `theme.go`, `format.go` : liste, miniatures, thème,
@@ -143,6 +186,9 @@ pCloud), puis se connecter par e-mail ; ou coller le jeton `auth` dans l'onglet
   jeton ne figurent jamais dans une URL.
 - Les fichiers sont écrits en `.part` puis renommés à la fin : pas de fichier
   partiel pris pour un fichier complet.
+- Exception à la règle des paramètres en POST : `upload_write` reçoit le contenu
+  brut du morceau comme corps de requête, ses paramètres (dont le jeton) sont
+  donc dans l'URL, en HTTPS.
 - `getmediatranscodelink` n'est pas documenté officiellement : sa réponse est
   interprétée de façon défensive, et son JSON brut est affiché en cas de forme
   inattendue.

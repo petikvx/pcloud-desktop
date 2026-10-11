@@ -3,6 +3,7 @@ package pcloud
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -10,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // Catégories de fichiers renvoyées par pCloud.
@@ -150,7 +153,7 @@ func (c *Client) PublicLink(ctx context.Context, it Item) (string, error) {
 	}
 	err := c.call(ctx, method, url.Values{key: {fmt.Sprint(it.ID())}}, &out)
 	if err == nil && out.Link == "" {
-		err = fmt.Errorf("lien absent de la réponse pCloud")
+		err = errors.New(i18n.T("lien absent de la réponse pCloud"))
 	}
 	return out.Link, err
 }
@@ -158,7 +161,7 @@ func (c *Client) PublicLink(ctx context.Context, it Item) (string, error) {
 // contentURL construit l'URL d'un contenu à partir d'une réponse hosts/path.
 func (c *Client) contentURL(hosts []string, path string) (string, error) {
 	if len(hosts) == 0 || path == "" {
-		return "", fmt.Errorf("lien de contenu absent de la réponse pCloud")
+		return "", errors.New(i18n.T("lien de contenu absent de la réponse pCloud"))
 	}
 	scheme := "https"
 	if strings.HasPrefix(c.base, "http://") {
@@ -218,7 +221,7 @@ func (c *Client) DownloadURL(ctx context.Context, u string, w io.Writer, progres
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("téléchargement refusé : %s", resp.Status)
+		return &statusError{code: resp.StatusCode, msg: i18n.Tf("téléchargement refusé : %s", resp.Status)}
 	}
 	_, err = io.Copy(&progressWriter{w: w, total: resp.ContentLength, progress: progress}, resp.Body)
 	return err
@@ -252,7 +255,7 @@ func (c *Client) Thumbnail(ctx context.Context, fileID uint64, size string) ([]b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("miniature refusée : %s", resp.Status)
+		return nil, &statusError{code: resp.StatusCode, msg: i18n.Tf("miniature refusée : %s", resp.Status)}
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }

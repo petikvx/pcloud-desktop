@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -16,12 +17,17 @@ import (
 	"pcloud-desktop/internal/pcloud"
 )
 
-const customLabel = "Personnalisé (transcodage par pCloud)"
+// customLabel est le choix « transcodage personnalisé » de la liste des versions.
+func customLabel() string { return tr("Personnalisé (transcodage par pCloud)") }
+
+// customResolutions : le premier choix est la résolution d'origine.
+func customResolutions() []string {
+	return []string{tr("Résolution d'origine"), "1280x720", "854x480", "640x360", "426x240"}
+}
 
 var (
-	customResolutions = []string{"Résolution d'origine", "1280x720", "854x480", "640x360", "426x240"}
-	customVideoRates  = []string{"500", "1000", "2000", "4000"}
-	customAudioRates  = []string{"64", "128", "192", "320"}
+	customVideoRates = []string{"500", "1000", "2000", "4000"}
+	customAudioRates = []string{"64", "128", "192", "320"}
 )
 
 // formatDuration affiche des secondes en h:mm:ss ou m:ss.
@@ -50,7 +56,7 @@ func variantLabel(v pcloud.VideoVariant) string {
 	}
 	label := strings.Join(parts, " · ")
 	if v.IsOriginal {
-		label += " (original)"
+		label += tr(" (original)")
 	}
 	return label
 }
@@ -75,7 +81,7 @@ func atoiOr(s string, def int) int {
 // la méthode utilisée par le site web de pCloud (souvent un master.m3u8, ouvert
 // dans l'outil HLS), puis se rabat sur la liste des variantes de l'API publique.
 func (b *browser) downloadStream(it pcloud.Item) {
-	b.status.SetText("Recherche du flux de streaming…")
+	b.status.SetText(tr("Recherche du flux de streaming…"))
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
@@ -92,14 +98,14 @@ func (b *browser) downloadStream(it pcloud.Item) {
 			case webErr == nil && (isHLS || looksLikeHLS(link)):
 				b.openHLSToolWith(link, it.Name)
 			case webErr == nil:
-				b.saveStream(it, streamFileName(it.Name, 0), func(context.Context) (string, error) { return link, nil })
+				b.saveStream(it, streamFileName(it.Name, 0), "direct", func(context.Context) (string, error) { return link, nil })
 			case pcloud.IsAuthError(webErr):
 				b.fail(webErr)
 			case apiErr == nil:
 				b.showStreamChoice(it, variants)
 			default:
-				dialog.ShowError(fmt.Errorf("aucune méthode de streaming n'a fonctionné pour « %s ».\n\n"+
-					"getmediatranscodelink : %v\n\ngetvideolinks : %v", it.Name, webErr, apiErr), b.w)
+				dialog.ShowError(errors.New(trf("aucune méthode de streaming n'a fonctionné pour « %s ».\n\n"+
+					"getmediatranscodelink : %v\n\ngetvideolinks : %v", it.Name, webErr, apiErr)), b.w)
 			}
 		})
 	}()
@@ -115,23 +121,24 @@ func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVarian
 	for _, v := range variants {
 		options = append(options, variantLabel(v))
 	}
-	options = append(options, customLabel)
+	options = append(options, customLabel())
 
-	resolution := widget.NewSelect(customResolutions, nil)
-	resolution.SetSelected(customResolutions[1])
+	resolutions := customResolutions()
+	resolution := widget.NewSelect(resolutions, nil)
+	resolution.SetSelected(resolutions[1])
 	vrate := widget.NewSelect(customVideoRates, nil)
 	vrate.SetSelected("2000")
 	arate := widget.NewSelect(customAudioRates, nil)
 	arate.SetSelected("128")
 	customForm := widget.NewForm(
-		widget.NewFormItem("Résolution", resolution),
-		widget.NewFormItem("Débit vidéo (kb/s)", vrate),
-		widget.NewFormItem("Débit audio (kb/s)", arate),
+		widget.NewFormItem(tr("Résolution"), resolution),
+		widget.NewFormItem(tr("Débit vidéo (kb/s)"), vrate),
+		widget.NewFormItem(tr("Débit audio (kb/s)"), arate),
 	)
 	customForm.Hide()
 
 	radio := widget.NewRadioGroup(options, func(s string) {
-		if s == customLabel {
+		if s == customLabel() {
 			customForm.Show()
 		} else {
 			customForm.Hide()
@@ -147,11 +154,11 @@ func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVarian
 	}
 	radio.SetSelected(options[pick])
 
-	intro := "Versions disponibles en streaming pour « " + it.Name + " » :"
+	intro := trf("Versions disponibles en streaming pour « %s » :", it.Name)
 	if len(variants) == 0 {
-		intro = "Aucune version streaming prête pour « " + it.Name + " » : transcodage personnalisé uniquement."
+		intro = trf("Aucune version streaming prête pour « %s » : transcodage personnalisé uniquement.", it.Name)
 	}
-	note := widget.NewLabel("La langue (piste audio) n'est pas exposée par l'API pCloud : seule la piste par défaut est fournie.\nLe fichier original conserve toutes ses pistes.")
+	note := widget.NewLabel(tr("La langue (piste audio) n'est pas exposée par l'API pCloud : seule la piste par défaut est fournie.\nLe fichier original conserve toutes ses pistes."))
 	note.Wrapping = fyne.TextWrapWord
 	label := widget.NewLabel(intro)
 	label.Wrapping = fyne.TextWrapWord
@@ -159,20 +166,20 @@ func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVarian
 	content := container.NewGridWrap(fyne.NewSize(520, 360),
 		container.NewVScroll(container.NewVBox(label, radio, customForm, widget.NewSeparator(), note)))
 
-	d := dialog.NewCustomConfirm("Version streaming", "Télécharger", "Annuler", content, func(ok bool) {
+	d := dialog.NewCustomConfirm(tr("Version streaming"), tr("Télécharger"), tr("Annuler"), content, func(ok bool) {
 		if !ok {
 			return
 		}
 		sel := radio.Selected
 		for i, v := range variants {
 			if options[i] == sel {
-				b.saveStream(it, streamFileName(it.Name, v.Height), func(ctx context.Context) (string, error) {
+				b.saveStream(it, streamFileName(it.Name, v.Height), variantLabel(v), func(ctx context.Context) (string, error) {
 					return b.c.VariantURL(v)
 				})
 				return
 			}
 		}
-		if sel != customLabel {
+		if sel != customLabel() {
 			return
 		}
 		opts := pcloud.VideoOptions{
@@ -180,13 +187,14 @@ func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVarian
 			AudioBitrate: atoiOr(arate.Selected, 0),
 		}
 		height := 0
-		if resolution.Selected != customResolutions[0] {
+		if resolution.Selected != resolutions[0] {
 			opts.Resolution = resolution.Selected
 			if _, h, ok := strings.Cut(opts.Resolution, "x"); ok {
 				height = atoiOr(h, 0)
 			}
 		}
-		b.saveStream(it, streamFileName(it.Name, height), func(ctx context.Context) (string, error) {
+		custom := fmt.Sprintf("custom:%s:%d:%d", opts.Resolution, opts.VideoBitrate, opts.AudioBitrate)
+		b.saveStream(it, streamFileName(it.Name, height), custom, func(ctx context.Context) (string, error) {
 			return b.c.VideoLink(ctx, it.FileID, opts)
 		})
 	}, b.w)
@@ -194,8 +202,9 @@ func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVarian
 }
 
 // saveStream demande où enregistrer, puis télécharge l'URL fournie par link.
-// L'URL est demandée au dernier moment : les liens pCloud expirent.
-func (b *browser) saveStream(it pcloud.Item, fileName string, link func(ctx context.Context) (string, error)) {
+// L'URL est demandée à chaque tentative : les liens pCloud expirent. variant
+// distingue les versions d'une même vidéo pour la reprise d'un téléchargement.
+func (b *browser) saveStream(it pcloud.Item, fileName, variant string, link func(ctx context.Context) (string, error)) {
 	d := dialog.NewFileSave(func(wc fyne.URIWriteCloser, err error) {
 		if err != nil {
 			dialog.ShowError(err, b.w)
@@ -204,18 +213,10 @@ func (b *browser) saveStream(it pcloud.Item, fileName string, link func(ctx cont
 		if wc == nil {
 			return
 		}
-		b.transfer("Téléchargement du streaming", func(ctx context.Context, report func(string, float64)) error {
-			defer wc.Close()
-			report(fileName+" · préparation…", 0)
-			u, err := link(ctx)
-			if err != nil {
-				return err
-			}
-			meter := newSpeedMeter()
-			return b.c.DownloadURL(ctx, u, wc, func(done, total int64) {
-				meter.Set(done)
-				report(progressText(fileName, done, total, meter.Rate()), fraction(done, total))
-			})
+		tag := fmt.Sprintf("stream:%s:%s", resumeTag(it), variant)
+		b.transfer(tr("Téléchargement du streaming"), func(ctx context.Context, report func(string, float64)) error {
+			report(fileName+tr(" · préparation…"), 0)
+			return b.saveInto(ctx, wc, link, tag, fileName, report)
 		})
 	}, b.w)
 	d.SetFileName(fileName)

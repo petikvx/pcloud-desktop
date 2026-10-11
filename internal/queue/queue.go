@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // State est l'état d'une tâche.
@@ -21,8 +23,23 @@ const (
 	Canceled
 )
 
+// String retourne l'état, traduit dans la langue active.
 func (s State) String() string {
-	return [...]string{"En attente", "En cours", "Terminé", "Échec", "Ignoré", "Annulé"}[s]
+	switch s {
+	case Pending:
+		return i18n.T("En attente")
+	case Running:
+		return i18n.T("En cours")
+	case Done:
+		return i18n.T("Terminé")
+	case Failed:
+		return i18n.T("Échec")
+	case Skipped:
+		return i18n.T("Ignoré")
+	case Canceled:
+		return i18n.T("Annulé")
+	}
+	return ""
 }
 
 // ErrSkipped : la tâche n'avait rien à faire (fichier déjà présent…).

@@ -27,14 +27,17 @@ const (
 	prefFolderSubs    = "folder.subs"
 )
 
-var audioQualityLabels = []string{"Meilleure version", "Version standard", "Version légère"}
+// audioQualityLabels : libellés des versions d'audio, de la meilleure à la plus légère.
+func audioQualityLabels() []string {
+	return []string{tr("Meilleure version"), tr("Version standard"), tr("Version légère")}
+}
 
-const bestHeightLabel = "Meilleure qualité"
+func bestHeightLabel() string { return tr("Meilleure qualité") }
 
 // downloadFolder explore un dossier pCloud, demande qualité vidéo et langues
 // une seule fois, puis télécharge tout son contenu dans un dossier local.
 func (b *browser) downloadFolder(folder pcloud.Item) {
-	b.status.SetText("Analyse du dossier « " + folder.Name + " »…")
+	b.status.SetText(trf("Analyse du dossier « %s »…", folder.Name))
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
@@ -52,13 +55,13 @@ func (b *browser) downloadFolder(folder pcloud.Item) {
 				link, isHLS, lerr := b.c.MediaTranscodeLink(ctx, e.Item.FileID)
 				switch {
 				case lerr != nil:
-					refNote = "Flux de « " + e.Item.Name + " » indisponible : " + lerr.Error()
+					refNote = trf("Flux de « %s » indisponible : %s", e.Item.Name, lerr)
 				case !isHLS:
-					refNote = "« " + e.Item.Name + " » n'a pas de flux HLS : téléchargement du fichier tel quel."
+					refNote = trf("« %s » n'a pas de flux HLS : téléchargement du fichier tel quel.", e.Item.Name)
 				default:
 					m, _, ferr := hls.NewDownloader().FetchPlaylist(ctx, link)
 					if ferr != nil {
-						refNote = "Playlist de « " + e.Item.Name + " » illisible : " + ferr.Error()
+						refNote = trf("Playlist de « %s » illisible : %s", e.Item.Name, ferr)
 					} else {
 						ref = m
 					}
@@ -73,7 +76,7 @@ func (b *browser) downloadFolder(folder pcloud.Item) {
 				return
 			}
 			if len(entries) == 0 {
-				dialog.ShowInformation("Dossier vide", "« "+folder.Name+" » ne contient aucun fichier.", b.w)
+				dialog.ShowInformation(tr("Dossier vide"), trf("« %s » ne contient aucun fichier.", folder.Name), b.w)
 				return
 			}
 			b.showFolderConfig(folder, entries, ref, refNote)
@@ -96,11 +99,11 @@ func (b *browser) showFolderConfig(folder pcloud.Item, entries []entry, ref *hls
 		}
 	}
 
-	intro := widget.NewLabel(fmt.Sprintf("« %s » : %d vidéo(s) (%s d'origine)", folder.Name, nVideos, humanSize(sizeVideos)))
+	intro := widget.NewLabel(trf("« %s » : %d vidéo(s) (%s d'origine)", folder.Name, nVideos, humanSize(sizeVideos)))
 	intro.Wrapping = fyne.TextWrapWord
 
 	// --- Qualité vidéo
-	heightOpts := []string{bestHeightLabel}
+	heightOpts := []string{bestHeightLabel()}
 	if ref != nil {
 		seen := map[int]bool{}
 		for _, v := range sortVariants(ref.Variants) {
@@ -111,7 +114,7 @@ func (b *browser) showFolderConfig(folder pcloud.Item, entries []entry, ref *hls
 		}
 	}
 	heightSel := widget.NewSelect(heightOpts, nil)
-	heightSel.SetSelected(bestHeightLabel)
+	heightSel.SetSelected(bestHeightLabel())
 	if saved := prefs.String(prefFolderHeight); saved != "" {
 		for _, o := range heightOpts {
 			if o == saved {
@@ -167,21 +170,22 @@ func (b *browser) showFolderConfig(folder pcloud.Item, entries []entry, ref *hls
 			multiVersion = true
 		}
 	}
-	qualitySel := widget.NewSelect(audioQualityLabels, nil)
-	qualitySel.SetSelected(audioQualityLabels[int(prefs.IntWithFallback(prefFolderQuality, 0))%len(audioQualityLabels)])
+	qualityLabels := audioQualityLabels()
+	qualitySel := widget.NewSelect(qualityLabels, nil)
+	qualitySel.SetSelected(qualityLabels[int(prefs.IntWithFallback(prefFolderQuality, 0))%len(qualityLabels)])
 
 	// --- Autres options
-	othersCheck := widget.NewCheck(fmt.Sprintf("Inclure aussi les %d autre(s) fichier(s) non vidéo (%s)", nOthers, humanSize(sizeOthers)), nil)
+	othersCheck := widget.NewCheck(trf("Inclure aussi les %d autre(s) fichier(s) non vidéo (%s)", nOthers, humanSize(sizeOthers)), nil)
 	if nOthers == 0 {
 		othersCheck.Disable()
 	}
 	ffmpeg, _ := exec.LookPath("ffmpeg")
-	mergeCheck := widget.NewCheck("Un seul MP4 par vidéo, audio et sous-titres fusionnés (ffmpeg)", nil)
+	mergeCheck := widget.NewCheck(tr("Un seul MP4 par vidéo, audio et sous-titres fusionnés (ffmpeg)"), nil)
 	if ffmpeg != "" {
 		mergeCheck.SetChecked(true)
 	} else {
 		mergeCheck.Disable()
-		mergeCheck.SetText(mergeCheck.Text + " — ffmpeg introuvable")
+		mergeCheck.SetText(mergeCheck.Text + tr(" — ffmpeg introuvable"))
 	}
 	parallelSel := widget.NewSelect([]string{"1", "2", "4", "6", "8", "12", "16"}, nil)
 	parallelSel.SetSelected(fmt.Sprint(prefs.IntWithFallback(prefHLSParallel, hls.DefaultParallel)))
@@ -196,27 +200,27 @@ func (b *browser) showFolderConfig(folder pcloud.Item, entries []entry, ref *hls
 		items = append(items, n)
 	}
 	if ref != nil {
-		items = append(items, section("Qualité vidéo"), heightSel)
+		items = append(items, section(tr("Qualité vidéo")), heightSel)
 		if len(audioLabels) > 0 {
-			items = append(items, section("Langues audio"), audioChecks)
+			items = append(items, section(tr("Langues audio")), audioChecks)
 			if multiVersion {
-				items = append(items, section("Version de l'audio"), qualitySel)
+				items = append(items, section(tr("Version de l'audio")), qualitySel)
 			}
 		}
 		if len(subLabels) > 0 {
-			items = append(items, section("Sous-titres"), subChecks)
+			items = append(items, section(tr("Sous-titres")), subChecks)
 		}
 	}
 	items = append(items, widget.NewSeparator(), othersCheck, mergeCheck,
-		container.NewBorder(nil, nil, widget.NewLabel("Connexions parallèles"), nil, parallelSel))
+		container.NewBorder(nil, nil, widget.NewLabel(tr("Connexions parallèles")), nil, parallelSel))
 
 	content := container.NewGridWrap(fyne.NewSize(560, 520), container.NewVScroll(container.NewVBox(items...)))
-	d := dialog.NewCustomConfirm("Télécharger le dossier", "Choisir la destination…", "Annuler", content, func(ok bool) {
+	d := dialog.NewCustomConfirm(tr("Télécharger le dossier"), tr("Choisir la destination…"), tr("Annuler"), content, func(ok bool) {
 		if !ok {
 			return
 		}
 		var p hls.Preferences
-		if h := strings.TrimSuffix(heightSel.Selected, "p"); heightSel.Selected != bestHeightLabel {
+		if h := strings.TrimSuffix(heightSel.Selected, "p"); heightSel.Selected != bestHeightLabel() {
 			p.Height = atoiOr(h, 0)
 		}
 		for _, l := range audioChecks.Selected {
@@ -226,7 +230,7 @@ func (b *browser) showFolderConfig(folder pcloud.Item, entries []entry, ref *hls
 			p.SubLangs = append(p.SubLangs, subKeys[l])
 		}
 		qi := 0
-		for i, l := range audioQualityLabels {
+		for i, l := range qualityLabels {
 			if l == qualitySel.Selected {
 				qi = i
 			}
@@ -273,12 +277,12 @@ func (b *browser) chooseDestination(folder pcloud.Item, entries []entry, p hls.P
 func (b *browser) runFolderQueue(name, root string, entries []entry, others bool, job *folderJob) {
 	tasks, kept := buildTasks(entries, others)
 	if len(tasks) == 0 {
-		dialog.ShowInformation("Rien à télécharger", "Aucune vidéo dans ce dossier. Cochez « Inclure aussi les autres fichiers ».", b.w)
+		dialog.ShowInformation(tr("Rien à télécharger"), tr("Aucune vidéo dans ce dossier. Cochez « Inclure aussi les autres fichiers »."), b.w)
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	win := b.a.NewWindow("Téléchargement : " + name)
+	win := b.a.NewWindow(trf("Téléchargement : %s", name))
 	win.Resize(fyne.NewSize(720, 520))
 
 	snapshot := append([]queue.Task(nil), tasks...)
@@ -302,7 +306,7 @@ func (b *browser) runFolderQueue(name, root string, entries []entry, others bool
 			t := snapshot[i]
 			row := o.(*fyne.Container)
 			row.Objects[0].(*widget.Label).SetText(t.Name)
-			detail := t.State.String()
+			detail := t.State.String() // déjà traduit
 			switch {
 			case t.State == queue.Failed && t.Err != nil:
 				detail += " : " + t.Err.Error()
@@ -322,18 +326,18 @@ func (b *browser) runFolderQueue(name, root string, entries []entry, others bool
 				done++
 			}
 		}
-		header.SetText(fmt.Sprintf("%d / %d fichier(s) traité(s) → %s", done, len(ts), root))
+		header.SetText(trf("%d / %d fichier(s) traité(s) → %s", done, len(ts), root))
 		overall.SetValue(float64(done) / float64(len(ts)))
 		list.Refresh()
 	}
 	update(snapshot)
 
-	cancelBtn := widget.NewButton("Annuler", func() { cancel() })
-	openBtn := widget.NewButton("Ouvrir le dossier", func() {
+	cancelBtn := widget.NewButton(tr("Annuler"), func() { cancel() })
+	openBtn := widget.NewButton(tr("Ouvrir le dossier"), func() {
 		_ = b.a.OpenURL(&url.URL{Scheme: "file", Path: root})
 	})
 	openBtn.Disable()
-	closeBtn := widget.NewButton("Fermer", func() { win.Close() })
+	closeBtn := widget.NewButton(tr("Fermer"), func() { win.Close() })
 	win.SetOnClosed(cancel)
 	win.SetContent(container.NewBorder(
 		container.NewVBox(header, overall),
@@ -350,7 +354,7 @@ func (b *browser) runFolderQueue(name, root string, entries []entry, others bool
 		fyne.Do(func() {
 			cancelBtn.Disable()
 			openBtn.Enable()
-			header.SetText(fmt.Sprintf("Terminé : %d téléchargé(s), %d ignoré(s) (déjà présents), %d échec(s), %d annulé(s) → %s",
+			header.SetText(trf("Terminé : %d téléchargé(s), %d ignoré(s) (déjà présents), %d échec(s), %d annulé(s) → %s",
 				sum.Done, sum.Skipped, sum.Failed, sum.Canceled, root))
 			if sum.Failed == 0 && sum.Canceled == 0 {
 				overall.SetValue(1)

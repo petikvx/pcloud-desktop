@@ -4,6 +4,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // Quality désigne une version d'une piste quand une même langue en propose
@@ -112,7 +114,7 @@ func Languages(rs []Rendition) []LangInfo {
 // Select applique des préférences à un master.
 func (m *Master) Select(p Preferences) (Selection, error) {
 	if m == nil || len(m.Variants) == 0 {
-		return Selection{}, errors.New("aucune variante vidéo")
+		return Selection{}, errors.New(i18n.T("aucune variante vidéo"))
 	}
 	var sel Selection
 

@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 
+	"pcloud-desktop/internal/i18n"
 	"pcloud-desktop/internal/pcloud"
 )
 
@@ -70,11 +71,7 @@ func summary(items []pcloud.Item) string {
 			total += it.Size
 		}
 	}
-	noun := "éléments"
-	if len(items) <= 1 {
-		noun = "élément"
-	}
-	s := fmt.Sprintf("%d %s", len(items), noun)
+	s := i18n.N(len(items), "%d élément", "%d éléments")
 	if total > 0 {
 		s += " · " + humanSize(total)
 	}
@@ -84,21 +81,21 @@ func summary(items []pcloud.Item) string {
 func humanSize(n int64) string {
 	const unit = 1024
 	if n < unit {
-		return fmt.Sprintf("%d o", n)
+		return fmt.Sprintf(tr("%d o"), n)
 	}
 	div, exp := int64(unit), 0
 	for m := n / unit; m >= unit; m /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %co", float64(n)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf(tr("%.1f %co"), float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 func formatDate(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Local().Format("02/01/2006 15:04")
+	return t.Local().Format(tr("02/01/2006 15:04"))
 }
 
 // iconFor choisit l'icône d'un élément d'après son type.

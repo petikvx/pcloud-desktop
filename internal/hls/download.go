@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pcloud-desktop/internal/i18n"
 )
 
 // DefaultParallel est le nombre de segments téléchargés simultanément par défaut.
@@ -107,7 +109,7 @@ func slice(data []byte, off, length int64) ([]byte, error) {
 		return data, nil
 	}
 	if off < 0 || off+length > int64(len(data)) {
-		return nil, errors.New("byte range hors du fichier")
+		return nil, errors.New(i18n.T("byte range hors du fichier"))
 	}
 	return data[off : off+length], nil
 }
@@ -155,12 +157,12 @@ type Options struct {
 // segment d'initialisation s'il existe). progress reçoit (segments faits, total).
 func (d *Downloader) Download(ctx context.Context, m *Media, w io.Writer, opt Options, progress func(done, total int)) error {
 	if !m.EndList {
-		return errors.New("flux en direct (sans #EXT-X-ENDLIST) : non géré")
+		return errors.New(i18n.T("flux en direct (sans #EXT-X-ENDLIST) : non géré"))
 	}
 	if m.Init != nil {
 		data, err := d.get(ctx, m.Init.URI, m.Init.Offset, m.Init.Length, opt.OnBytes)
 		if err != nil {
-			return fmt.Errorf("segment d'initialisation : %w", err)
+			return fmt.Errorf(i18n.T("segment d'initialisation : %w"), err)
 		}
 		if _, err := w.Write(data); err != nil {
 			return err
@@ -208,7 +210,7 @@ func (d *Downloader) Download(ctx context.Context, m *Media, w io.Writer, opt Op
 		}
 		<-sem
 		if r.err != nil {
-			return fmt.Errorf("segment %d/%d : %w", i+1, n, r.err)
+			return fmt.Errorf(i18n.T("segment %d/%d : %w"), i+1, n, r.err)
 		}
 		data := r.data
 		if opt.WebVTT && i > 0 {
@@ -256,7 +258,7 @@ func (d *Downloader) segment(ctx context.Context, s Segment, onBytes func(n int)
 func (d *Downloader) decrypt(ctx context.Context, data []byte, s Segment) ([]byte, error) {
 	key, err := d.key(ctx, s.Key.URI)
 	if err != nil {
-		return nil, fmt.Errorf("clé de déchiffrement : %w", err)
+		return nil, fmt.Errorf(i18n.T("clé de déchiffrement : %w"), err)
 	}
 	iv := s.Key.IV
 	if iv == nil {
@@ -279,7 +281,7 @@ func (d *Downloader) key(ctx context.Context, uri string) ([]byte, error) {
 		return nil, err
 	}
 	if len(k) != 16 {
-		return nil, fmt.Errorf("clé de %d octets (16 attendus)", len(k))
+		return nil, fmt.Errorf(i18n.T("clé de %d octets (16 attendus)"), len(k))
 	}
 	if d.keys == nil {
 		d.keys = map[string][]byte{}
@@ -290,7 +292,7 @@ func (d *Downloader) key(ctx context.Context, uri string) ([]byte, error) {
 
 func decryptAES128(data, key, iv []byte) ([]byte, error) {
 	if len(data)%aes.BlockSize != 0 {
-		return nil, errors.New("segment chiffré de longueur invalide")
+		return nil, errors.New(i18n.T("segment chiffré de longueur invalide"))
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -303,7 +305,7 @@ func decryptAES128(data, key, iv []byte) ([]byte, error) {
 	}
 	pad := int(out[len(out)-1])
 	if pad < 1 || pad > aes.BlockSize || pad > len(out) {
-		return nil, errors.New("bourrage PKCS#7 invalide (mauvaise clé ?)")
+		return nil, errors.New(i18n.T("bourrage PKCS#7 invalide (mauvaise clé ?)"))
 	}
 	return out[:len(out)-pad], nil
 }

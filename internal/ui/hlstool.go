@@ -37,13 +37,13 @@ func hlsVariantLabel(v hls.Variant) string {
 		parts = append(parts, fmt.Sprintf("%.1f Mb/s", float64(v.Bandwidth)/1e6))
 	}
 	if v.FrameRate > 0 {
-		parts = append(parts, fmt.Sprintf("%.0f i/s", v.FrameRate))
+		parts = append(parts, fmt.Sprintf(tr("%.0f i/s"), v.FrameRate))
 	}
 	if v.Codecs != "" {
 		parts = append(parts, v.Codecs)
 	}
 	if len(parts) == 0 {
-		return "Flux"
+		return tr("Flux")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -55,13 +55,13 @@ func hlsRenditionLabel(r hls.Rendition) string {
 		name = r.Language
 	}
 	if name == "" {
-		name = "Piste"
+		name = tr("Piste")
 	}
 	if r.Language != "" && !strings.EqualFold(r.Language, name) {
 		name += " (" + r.Language + ")"
 	}
 	if r.Default {
-		name += " · par défaut"
+		name += tr(" · par défaut")
 	}
 	return name
 }
@@ -74,10 +74,10 @@ func hlsAudioLabel(r hls.Rendition) string {
 		return label
 	}
 	// Le marqueur « par défaut » reste en fin de libellé.
-	label = strings.TrimSuffix(label, " · par défaut")
-	label += " · groupe " + r.GroupID
+	label = strings.TrimSuffix(label, tr(" · par défaut"))
+	label += trf(" · groupe %s", r.GroupID)
 	if r.Default {
-		label += " · par défaut"
+		label += tr(" · par défaut")
 	}
 	return label
 }
@@ -243,7 +243,7 @@ func (b *browser) openHLSToolWith(src, name string) {
 	)
 
 	entry := widget.NewEntry()
-	entry.SetPlaceHolder("https://…/master.m3u8  ou  /chemin/vers/master.m3u8")
+	entry.SetPlaceHolder(tr("https://…/master.m3u8  ou  /chemin/vers/master.m3u8"))
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
 
@@ -256,9 +256,9 @@ func (b *browser) openHLSToolWith(src, name string) {
 	subNote.Wrapping = fyne.TextWrapWord
 
 	choices := container.NewVBox(
-		widget.NewLabelWithStyle("Qualité vidéo", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), variantRadio,
-		widget.NewLabelWithStyle("Pistes audio (langues)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), audioChecks, audioNote,
-		widget.NewLabelWithStyle("Sous-titres", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), subChecks, subNote,
+		widget.NewLabelWithStyle(tr("Qualité vidéo"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), variantRadio,
+		widget.NewLabelWithStyle(tr("Pistes audio (langues)"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), audioChecks, audioNote,
+		widget.NewLabelWithStyle(tr("Sous-titres"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), subChecks, subNote,
 	)
 	choices.Hide()
 
@@ -298,11 +298,11 @@ func (b *browser) openHLSToolWith(src, name string) {
 		}
 		audioChecks.Refresh()
 		if len(alabels) == 0 {
-			audioNote.SetText("Aucune piste audio séparée : l'audio est inclus dans la vidéo.")
+			audioNote.SetText(tr("Aucune piste audio séparée : l'audio est inclus dans la vidéo."))
 			audioChecks.Hide()
 		} else {
-			audioNote.SetText("Chaque piste cochée est enregistrée dans son propre fichier (ou fusionnée dans le MP4). " +
-				"Les groupes (v1a, v2a…) sont les versions d'audio déclarées par le flux, par exemple low / normal / high.")
+			audioNote.SetText(tr("Chaque piste cochée est enregistrée dans son propre fichier (ou fusionnée dans le MP4). " +
+				"Les groupes (v1a, v2a…) sont les versions d'audio déclarées par le flux, par exemple low / normal / high."))
 			audioChecks.Show()
 		}
 
@@ -314,7 +314,7 @@ func (b *browser) openHLSToolWith(src, name string) {
 		subChecks.SetSelected(keepExisting(subChecks.Selected, slabels))
 		subChecks.Refresh()
 		if len(slabels) == 0 {
-			subNote.SetText("Aucun sous-titre séparé dans ce flux.")
+			subNote.SetText(tr("Aucun sous-titre séparé dans ce flux."))
 			subChecks.Hide()
 		} else {
 			subNote.SetText("")
@@ -326,10 +326,10 @@ func (b *browser) openHLSToolWith(src, name string) {
 	analyse := func() {
 		src := strings.TrimSpace(entry.Text)
 		if src == "" {
-			status.SetText("Saisissez l'URL ou le chemin d'un master.m3u8.")
+			status.SetText(tr("Saisissez l'URL ou le chemin d'un master.m3u8."))
 			return
 		}
-		status.SetText("Analyse de la playlist…")
+		status.SetText(tr("Analyse de la playlist…"))
 		choices.Hide()
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -338,16 +338,16 @@ func (b *browser) openHLSToolWith(src, name string) {
 			fyne.Do(func() {
 				if err != nil {
 					master, single, variants, labels = nil, nil, nil, nil
-					status.SetText("Échec : " + err.Error())
+					status.SetText(trf("Échec : %s", err))
 					return
 				}
 				source, master, single = src, m, md
 				if m == nil {
-					variants, labels = nil, []string{fmt.Sprintf("Playlist média unique · %d segments · %s", len(md.Segments), formatDuration(md.Duration))}
+					variants, labels = nil, []string{trf("Playlist média unique · %d segments · %s", len(md.Segments), formatDuration(md.Duration))}
 					variantRadio.Options = labels
 					variantRadio.Refresh()
 					variantRadio.SetSelected(labels[0])
-					status.SetText("Playlist média (pas de master) : un seul flux.")
+					status.SetText(tr("Playlist média (pas de master) : un seul flux."))
 				} else {
 					variants = sortVariants(m.Variants)
 					labels = make([]string, len(variants))
@@ -357,7 +357,7 @@ func (b *browser) openHLSToolWith(src, name string) {
 					variantRadio.Options = labels
 					variantRadio.Refresh()
 					variantRadio.SetSelected(labels[0])
-					status.SetText(fmt.Sprintf("%d variante(s) · %d piste(s) alternative(s).", len(m.Variants), len(m.Renditions)))
+					status.SetText(trf("%d variante(s) · %d piste(s) alternative(s).", len(m.Variants), len(m.Renditions)))
 				}
 				audioChecks.SetSelected(nil)
 				subChecks.SetSelected(nil)
@@ -367,8 +367,8 @@ func (b *browser) openHLSToolWith(src, name string) {
 		}()
 	}
 	entry.OnSubmitted = func(string) { analyse() }
-	analyseBtn := widget.NewButton("Analyser", analyse)
-	pickFile := widget.NewButton("Fichier…", func() {
+	analyseBtn := widget.NewButton(tr("Analyser"), analyse)
+	pickFile := widget.NewButton(tr("Fichier…"), func() {
 		fd := dialog.NewFileOpen(func(rc fyne.URIReadCloser, err error) {
 			if err != nil || rc == nil {
 				return
@@ -388,20 +388,20 @@ func (b *browser) openHLSToolWith(src, name string) {
 	if parallel.Selected == "" {
 		parallel.SetSelected(fmt.Sprint(hls.DefaultParallel))
 	}
-	parallelRow := container.NewBorder(nil, nil, widget.NewLabel("Connexions parallèles (comme yt-dlp -N)"), nil, parallel)
+	parallelRow := container.NewBorder(nil, nil, widget.NewLabel(tr("Connexions parallèles (comme yt-dlp -N)")), nil, parallel)
 
 	ffmpeg, _ := exec.LookPath("ffmpeg")
-	convert := widget.NewCheck("Convertir en MP4 et fusionner audio / sous-titres (ffmpeg)", nil)
+	convert := widget.NewCheck(tr("Convertir en MP4 et fusionner audio / sous-titres (ffmpeg)"), nil)
 	note := widget.NewLabel("")
 	note.Wrapping = fyne.TextWrapWord
 	if ffmpeg != "" {
 		convert.SetChecked(true)
-		note.SetText("Sans ré-encodage : quelques secondes de plus. Décoché, vidéo, audio et sous-titres sont " +
-			"enregistrés en fichiers séparés (.ts / .vtt), le conteneur d'origine du flux.")
+		note.SetText(tr("Sans ré-encodage : quelques secondes de plus. Décoché, vidéo, audio et sous-titres sont " +
+			"enregistrés en fichiers séparés (.ts / .vtt), le conteneur d'origine du flux."))
 	} else {
 		convert.Disable()
-		note.SetText("ffmpeg est introuvable : vidéo, audio et sous-titres sont enregistrés en fichiers séparés " +
-			"(.ts / .vtt). Installez ffmpeg pour obtenir un MP4 unique.")
+		note.SetText(tr("ffmpeg est introuvable : vidéo, audio et sous-titres sont enregistrés en fichiers séparés " +
+			"(.ts / .vtt). Installez ffmpeg pour obtenir un MP4 unique."))
 	}
 
 	content := container.NewGridWrap(fyne.NewSize(600, 480), container.NewVScroll(container.NewVBox(
@@ -409,12 +409,12 @@ func (b *browser) openHLSToolWith(src, name string) {
 		status, choices, widget.NewSeparator(), parallelRow, convert, note,
 	)))
 
-	d := dialog.NewCustomConfirm("Lire un flux HLS (master.m3u8)", "Télécharger", "Fermer", content, func(ok bool) {
+	d := dialog.NewCustomConfirm(tr("Lire un flux HLS (master.m3u8)"), tr("Télécharger"), tr("Fermer"), content, func(ok bool) {
 		if !ok {
 			return
 		}
 		if choices.Hidden || (master == nil && single == nil) {
-			dialog.ShowInformation("Flux HLS", "Analysez d'abord une playlist.", b.w)
+			dialog.ShowInformation(tr("Flux HLS"), tr("Analysez d'abord une playlist."), b.w)
 			return
 		}
 		var chosenAudio, chosenSubs []hls.Rendition
@@ -466,7 +466,7 @@ func contains(list []string, s string) bool {
 // et sous-titres sélectionnés.
 // merge non vide : chemin de ffmpeg, pour assembler le tout en un MP4.
 func (b *browser) startHLS(dl *hls.Downloader, baseName, videoURL string, single *hls.Media, audio, subs []hls.Rendition, merge string) {
-	b.status.SetText("Lecture de la playlist vidéo…")
+	b.status.SetText(tr("Lecture de la playlist vidéo…"))
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -476,7 +476,7 @@ func (b *browser) startHLS(dl *hls.Downloader, baseName, videoURL string, single
 			var nested *hls.Master
 			nested, video, err = dl.FetchPlaylist(ctx, videoURL)
 			if err == nil && nested != nil {
-				err = errors.New("playlist inattendue : un master a été renvoyé à la place d'une playlist média")
+				err = errors.New(tr("playlist inattendue : un master a été renvoyé à la place d'une playlist média"))
 			}
 		}
 		fyne.Do(func() {
@@ -503,10 +503,10 @@ func (b *browser) saveHLS(dl *hls.Downloader, baseName string, video *hls.Media,
 		if wc == nil {
 			return
 		}
-		b.transfer("Téléchargement HLS", func(ctx context.Context, report func(string, float64)) error {
+		b.transfer(tr("Téléchargement HLS"), func(ctx context.Context, report func(string, float64)) error {
 			finished := func(files []string) {
 				fyne.Do(func() {
-					dialog.ShowInformation("Téléchargement terminé", "Fichiers enregistrés :\n"+strings.Join(files, "\n"), b.w)
+					dialog.ShowInformation(tr("Téléchargement terminé"), tr("Fichiers enregistrés :\n")+strings.Join(files, "\n"), b.w)
 				})
 			}
 			if merge != "" {
@@ -538,13 +538,13 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 		opt   hls.Options
 	}
 	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
-	jobs := []job{{label: "Vidéo", media: video}}
+	jobs := []job{{label: tr("Vidéo"), media: video}}
 	for _, r := range audio {
-		jobs = append(jobs, job{label: "Audio · " + hlsAudioLabel(r), uri: r.URI, audio: true,
+		jobs = append(jobs, job{label: tr("Audio · ") + hlsAudioLabel(r), uri: r.URI, audio: true,
 			stem: base + "." + suffixFor(r, audio)})
 	}
 	for _, r := range subs {
-		jobs = append(jobs, job{label: "Sous-titres · " + hlsAudioLabel(r), uri: r.URI,
+		jobs = append(jobs, job{label: tr("Sous-titres · ") + hlsAudioLabel(r), uri: r.URI,
 			stem: base + "." + suffixFor(r, subs), opt: hls.Options{WebVTT: true}})
 	}
 
@@ -558,7 +558,7 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 				return fmt.Errorf("%s : %w", j.label, err)
 			}
 			if nested != nil || md == nil {
-				return fmt.Errorf("%s : playlist média attendue", j.label)
+				return fmt.Errorf(tr("%s : playlist média attendue"), j.label)
 			}
 			m = md
 		}
@@ -601,13 +601,13 @@ func runHLS(ctx context.Context, dl *hls.Downloader, videoW io.Writer, videoPath
 // jobBytes : octets reçus pour cette piste ; sert à estimer le temps restant à
 // partir de la taille moyenne des segments déjà reçus.
 func hlsProgressText(label string, seg, total int, allBytes, jobBytes int64, rate float64) string {
-	s := fmt.Sprintf("%s · segment %d/%d · %s", label, seg, total, humanSize(allBytes))
+	s := trf("%s · segment %d/%d · %s", label, seg, total, humanSize(allBytes))
 	if r := formatRate(rate); r != "" {
 		s += " · " + r
 		if seg > 0 && total > seg {
 			remaining := float64(jobBytes) / float64(seg) * float64(total-seg)
 			if eta := formatETA(remaining / rate); eta != "" {
-				s += " · reste " + eta
+				s += trf(" · reste %s", eta)
 			}
 		}
 	}
@@ -638,7 +638,7 @@ func suffixFor(r hls.Rendition, same []hls.Rendition) string {
 		s = safeSuffix(r.Name)
 	}
 	if s == "" {
-		s = "piste"
+		s = tr("piste")
 	}
 	n := 0
 	for _, o := range same {
