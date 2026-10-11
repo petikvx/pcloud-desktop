@@ -74,6 +74,26 @@ Sans les en-têtes Wayland, compiler en X11 seulement : `go run -tags x11 .`.
 **ffmpeg** est facultatif : il sert uniquement à assembler vidéo, audio et
 sous-titres en un MP4 (`sudo apt install ffmpeg`).
 
+## Installer (paquet .deb)
+
+```sh
+sudo apt install ./pcloud-desktop_0.1.0_amd64.deb
+pcloud-desktop --version
+```
+
+Le paquet (Wayland + X11) installe le binaire, l'entrée de menu et l'icône.
+`ffmpeg` est recommandé, pas obligatoire.
+
+### Construire le .deb
+
+```sh
+sudo apt install gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
+packaging/build-deb.sh 0.1.0      # produit dist/pcloud-desktop_0.1.0_amd64.deb
+```
+
+Les dépendances sont déduites des bibliothèques réellement liées au binaire
+(`ldd`), complétées de celles que GLFW charge à l'exécution.
+
 ## Compte créé avec Google
 
 Un compte créé via « Se connecter avec Google » n'a pas de mot de passe pCloud.
@@ -84,6 +104,7 @@ pCloud), puis se connecter par e-mail ; ou coller le jeton `auth` dans l'onglet
 ## Structure
 
 - `main.go` : point d'entrée, crée la fenêtre et applique le thème.
+- `packaging/` : script de construction du `.deb`, icône.
 - `internal/pcloud/` : client de l'API pCloud, sans code d'interface.
   - `client.go` : appels, erreurs, session ;
   - `api.go` : fichiers, dossiers, transferts, miniatures ;
@@ -123,3 +144,7 @@ go test -race ./...    # avec détection de courses
 Les tests utilisent des serveurs HTTP factices (aucun accès à un vrai compte).
 Un test d'intégration utilise le vrai `ffmpeg` s'il est installé, et se saute
 sinon.
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE).
