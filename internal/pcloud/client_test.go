@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -320,5 +321,36 @@ func TestVideoLinkSendsFixedBitrateAndOptions(t *testing.T) {
 		if _, ok := f.form[k]; ok {
 			t.Errorf("%s ne devrait pas être envoyé", k)
 		}
+	}
+}
+
+func TestMediaTranscodeLinkShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		resp map[string]any
+		want string // suffixe de l'URL attendue ; vide : erreur attendue
+	}{
+		{"hosts+path", map[string]any{"result": 0, "hosts": []string{"s1.pcloud.com"}, "path": "/x/master.m3u8"}, "s1.pcloud.com/x/master.m3u8"},
+		{"url", map[string]any{"result": 0, "url": "https://cdn.example/master.m3u8"}, "https://cdn.example/master.m3u8"},
+		{"inconnu", map[string]any{"result": 0, "streams": []string{"a"}}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, c := newFake(t, map[string]any{"/getmediatranscodelink": tc.resp})
+			u, err := c.MediaTranscodeLink(context.Background(), 98339677951)
+			if f.form["fileid"][0] != "98339677951" || f.form["transcodeahead"][0] != "true" || f.form["mediatype"][0] != "video" {
+				t.Fatalf("form = %v", f.form)
+			}
+			if tc.want == "" {
+				var ue *UnexpectedResponseError
+				if !errors.As(err, &ue) || !strings.Contains(ue.Raw, "streams") {
+					t.Fatalf("err = %v, attendu UnexpectedResponseError avec le JSON brut", err)
+				}
+				return
+			}
+			if err != nil || !strings.HasSuffix(u, tc.want) {
+				t.Fatalf("u = %q, err = %v", u, err)
+			}
+		})
 	}
 }

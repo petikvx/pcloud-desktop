@@ -71,23 +71,43 @@ func atoiOr(s string, def int) int {
 	return def
 }
 
-// downloadStream laisse choisir une version streaming d'une vidéo (variantes
-// existantes ou transcodage personnalisé), puis la télécharge.
+// downloadStream récupère le lien de streaming d'une vidéo. Il essaie d'abord
+// la méthode utilisée par le site web de pCloud (souvent un master.m3u8, ouvert
+// dans l'outil HLS), puis se rabat sur la liste des variantes de l'API publique.
 func (b *browser) downloadStream(it pcloud.Item) {
-	b.status.SetText("Recherche des formats disponibles…")
+	b.status.SetText("Recherche du flux de streaming…")
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
-		variants, err := b.c.VideoVariants(ctx, it.FileID)
+
+		link, webErr := b.c.MediaTranscodeLink(ctx, it.FileID)
+		var variants []pcloud.VideoVariant
+		var apiErr error
+		if webErr != nil && !pcloud.IsAuthError(webErr) {
+			variants, apiErr = b.c.VideoVariants(ctx, it.FileID)
+		}
 		fyne.Do(func() {
 			b.status.SetText(summary(b.view))
-			if err != nil {
-				b.fail(err)
-				return
+			switch {
+			case webErr == nil && looksLikeHLS(link):
+				b.openHLSToolWith(link)
+			case webErr == nil:
+				b.saveStream(it, streamFileName(it.Name, 0), func(context.Context) (string, error) { return link, nil })
+			case pcloud.IsAuthError(webErr):
+				b.fail(webErr)
+			case apiErr == nil:
+				b.showStreamChoice(it, variants)
+			default:
+				dialog.ShowError(fmt.Errorf("aucune méthode de streaming n'a fonctionné pour « %s ».\n\n"+
+					"getmediatranscodelink : %v\n\ngetvideolinks : %v", it.Name, webErr, apiErr), b.w)
 			}
-			b.showStreamChoice(it, variants)
 		})
 	}()
+}
+
+// looksLikeHLS devine qu'une URL de streaming est une playlist HLS.
+func looksLikeHLS(u string) bool {
+	return strings.Contains(strings.ToLower(u), ".m3u8")
 }
 
 func (b *browser) showStreamChoice(it pcloud.Item, variants []pcloud.VideoVariant) {

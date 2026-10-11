@@ -2,6 +2,7 @@ package pcloud
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -93,4 +94,51 @@ func (c *Client) VideoLink(ctx context.Context, fileID uint64, opts VideoOptions
 		return "", err
 	}
 	return c.contentURL(out.Hosts, out.Path)
+}
+
+// UnexpectedResponseError signale une réponse valide (result 0) dont la forme
+// n'est pas reconnue ; Raw contient le JSON reçu pour pouvoir le diagnostiquer.
+type UnexpectedResponseError struct {
+	Method string
+	Raw    string
+}
+
+func (e *UnexpectedResponseError) Error() string {
+	return fmt.Sprintf("réponse inattendue de %s : %s", e.Method, e.Raw)
+}
+
+// MediaTranscodeLink demande le lien de streaming transcodé d'une vidéo, avec
+// la méthode (non documentée) qu'utilise le site web de pCloud. Le lien est
+// souvent une playlist HLS (master.m3u8) ; l'appelant en décide d'après l'URL.
+func (c *Client) MediaTranscodeLink(ctx context.Context, fileID uint64) (string, error) {
+	var raw json.RawMessage
+	err := c.call(ctx, "getmediatranscodelink", url.Values{
+		"fileid":         {fmt.Sprint(fileID)},
+		"transcodeahead": {"true"},
+		"mediatype":      {"video"},
+	}, &raw)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Hosts []string `json:"hosts"`
+		Path  string   `json:"path"`
+		URL   string   `json:"url"`
+		Link  string   `json:"link"`
+	}
+	if err := json.Unmarshal(raw, &r); err == nil {
+		switch {
+		case r.URL != "":
+			return r.URL, nil
+		case r.Link != "":
+			return r.Link, nil
+		case len(r.Hosts) > 0 && r.Path != "":
+			return c.contentURL(r.Hosts, r.Path)
+		}
+	}
+	s := string(raw)
+	if len(s) > 1200 {
+		s = s[:1200] + "…"
+	}
+	return "", &UnexpectedResponseError{Method: "getmediatranscodelink", Raw: s}
 }

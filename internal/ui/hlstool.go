@@ -130,7 +130,10 @@ func safeSuffix(s string) string {
 
 // openHLSTool ouvre l'outil « Flux HLS » : lit un master.m3u8 (URL ou fichier),
 // propose qualité, pistes audio et sous-titres, puis télécharge.
-func (b *browser) openHLSTool() {
+func (b *browser) openHLSTool() { b.openHLSToolWith("") }
+
+// openHLSToolWith ouvre l'outil ; si src n'est pas vide, il est analysé aussitôt.
+func (b *browser) openHLSToolWith(src string) {
 	dl := hls.NewDownloader()
 
 	var (
@@ -320,7 +323,12 @@ func (b *browser) openHLSTool() {
 		b.startHLS(dl, source, videoURL, single, chosenAudio, chosenSubs)
 	}, b.w)
 	d.Show()
-	b.w.Canvas().Focus(entry)
+	if src != "" {
+		entry.SetText(src)
+		analyse()
+	} else {
+		b.w.Canvas().Focus(entry)
+	}
 }
 
 func contains(list []string, s string) bool {
